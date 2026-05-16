@@ -3,8 +3,8 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/axgrid/deploy/internal/runner"
-	"github.com/axgrid/deploy/internal/secrets"
+	"github.com/axgrid/axup/internal/runner"
+	"github.com/axgrid/axup/internal/secrets"
 )
 
 var Version = "dev"
@@ -16,9 +16,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:           "deploy",
+	Use:           "axup",
 	Short:         "Lightweight ansible-style deploy utility",
-	Long:          "deploy bootstraps servers and rolls out projects via rulebook.yaml playbooks over SSH.",
+	Long:          "axup bootstraps servers and rolls out projects via rulebook.yaml playbooks over SSH.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
@@ -40,6 +40,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "check", false, "Preview tasks without applying any changes (alias: --dry-run)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Alias for --check")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors (auto-disabled when stdout is not a TTY)")
-	rootCmd.PersistentFlags().StringSliceVar(&ageKeyPaths, "age-key", nil, "Path to age identity file (repeatable; overrides auto-discovery; $DEPLOY_AGE_KEY is a path-list alternative)")
+	rootCmd.PersistentFlags().StringSliceVar(&ageKeyPaths, "age-key", nil, "Path to age identity file (repeatable; overrides auto-discovery; $AXUP_AGE_KEY is a path-list alternative)")
 	rootCmd.AddCommand(versionCmd, initCmd, bootstrapCmd, deployCmd, runCmd, logsCmd, depsCmd, secretsCmd, statusCmd)
 }

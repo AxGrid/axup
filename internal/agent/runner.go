@@ -10,7 +10,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/axgrid/deploy/internal/protocol"
+	"github.com/axgrid/axup/internal/protocol"
 )
 
 func Run(in io.Reader, out io.Writer) error {

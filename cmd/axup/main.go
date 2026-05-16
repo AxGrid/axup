@@ -1,4 +1,4 @@
-// Command deploy is the local CLI. It parses rulebooks, uploads the embedded
+// Command axup is the local CLI. It parses rulebooks, uploads the embedded
 // agent over SSH, and orchestrates bootstrap/deploy runs against target hosts.
 package main
 
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/axgrid/deploy/internal/cli"
+	"github.com/axgrid/axup/internal/cli"
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=...".

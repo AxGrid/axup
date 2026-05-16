@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/axgrid/deploy/internal/rulebook"
+	"github.com/axgrid/axup/internal/rulebook"
 )
 
 var (
@@ -22,7 +22,7 @@ var depsCmd = &cobra.Command{
 
 var depsTidyCmd = &cobra.Command{
 	Use:   "tidy",
-	Short: "Resolve all deps to fresh SHAs and rewrite deploy.lock",
+	Short: "Resolve all deps to fresh SHAs and rewrite axup.lock",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		rb, err := loadRulebookHeader(depsRulebook)
 		if err != nil {
@@ -49,7 +49,7 @@ var depsTidyCmd = &cobra.Command{
 
 var depsVerifyCmd = &cobra.Command{
 	Use:   "verify",
-	Short: "Verify deploy.lock matches the declared deps (no network resolution)",
+	Short: "Verify axup.lock matches the declared deps (no network resolution)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		rb, err := loadRulebookHeader(depsRulebook)
 		if err != nil {
@@ -60,7 +60,7 @@ var depsVerifyCmd = &cobra.Command{
 			return err
 		}
 		if lock == nil {
-			return fmt.Errorf("no %s in %s — run `deploy deps tidy`", rulebook.LockFileName, rb.Dir)
+			return fmt.Errorf("no %s in %s — run `axup deps tidy`", rulebook.LockFileName, rb.Dir)
 		}
 		missing := 0
 		for _, d := range rb.Deps {
@@ -79,7 +79,7 @@ var depsVerifyCmd = &cobra.Command{
 			fmt.Printf("OK     %s %s %s @ %s\n", d.Name, d.Git, d.Version, entry.Sha[:12])
 		}
 		if missing > 0 {
-			return fmt.Errorf("%d dep(s) need `deploy deps tidy`", missing)
+			return fmt.Errorf("%d dep(s) need `axup deps tidy`", missing)
 		}
 		return nil
 	},

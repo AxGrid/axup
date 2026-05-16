@@ -15,9 +15,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/axgrid/deploy/internal/inventory"
-	"github.com/axgrid/deploy/internal/rulebook"
-	"github.com/axgrid/deploy/internal/transport"
+	"github.com/axgrid/axup/internal/inventory"
+	"github.com/axgrid/axup/internal/rulebook"
+	"github.com/axgrid/axup/internal/transport"
 )
 
 var (
@@ -36,16 +36,16 @@ var logsCmd = &cobra.Command{
 	Long: `Stream logs from a service (or several) across the chosen host(s).
 
 The rulebook's top-level ` + "`services:`" + ` map declares which files belong to
-each named service. ` + "`deploy logs`" + ` opens an SSH session per host and runs
+each named service. ` + "`axup logs`" + ` opens an SSH session per host and runs
 ` + "`tail -n N -F`" + ` against the resolved paths; lines are forwarded to local
 stdout prefixed with ` + "`[host]`" + ` so multi-host output stays attributable.
 
 Examples:
 
-  deploy logs kv crash --host stage-1
-  deploy logs --group stage rng billing
-  deploy logs --list                     # show declared services
-  deploy logs crash --host stage-1 -n 200 --no-follow
+  axup logs kv crash --host stage-1
+  axup logs --group stage rng billing
+  axup logs --list                     # show declared services
+  axup logs crash --host stage-1 -n 200 --no-follow
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		rb, err := rulebook.Load(logsRulebook, rulebook.LoadOptions{VarsFile: logsVarsFile})
@@ -56,7 +56,7 @@ Examples:
 			return printServicesList(rb)
 		}
 		if len(args) == 0 {
-			return fmt.Errorf("at least one service name is required (try `deploy logs --list`)")
+			return fmt.Errorf("at least one service name is required (try `axup logs --list`)")
 		}
 		paths, err := resolveLogPaths(rb, args)
 		if err != nil {

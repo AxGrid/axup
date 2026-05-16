@@ -124,7 +124,7 @@ func (c *Client) RunAgent(remotePath string, planJSON []byte, exec AgentExec, on
 	var stdin bytes.Buffer
 	if exec.Sudo {
 		// -H sets HOME to the target user (root), so the agent's state path
-		// lands in /root/.deploy-state regardless of the SSH login user.
+		// lands in /root/.axup-state regardless of the SSH login user.
 		// -S reads the password from stdin, -p '' suppresses the prompt
 		// (we already know we're piping).
 		cmd = "sudo -H -S -p '' " + cmd
@@ -198,7 +198,7 @@ func streamLines(r io.Reader, onLine func([]byte)) error {
 // provided writers as bytes arrive. Returns when the remote process
 // exits OR when ctx is cancelled (whichever comes first). On
 // cancellation the SSH session is closed, which kills the remote
-// process. Used by `deploy logs` for tail -F streaming.
+// process. Used by `axup logs` for tail -F streaming.
 func (c *Client) Stream(ctx context.Context, cmd string, stdout, stderr io.Writer) error {
 	sess, err := c.c.NewSession()
 	if err != nil {

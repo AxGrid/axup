@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/axgrid/deploy/internal/protocol"
+	"github.com/axgrid/axup/internal/protocol"
 )
 
 // summary tallies per-status counts across a host's events so the runner can

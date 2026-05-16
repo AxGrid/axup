@@ -5,27 +5,27 @@ Every subcommand, flag, and environment variable in one place.
 ## Synopsis
 
 ```
-deploy <command> [flags] [args]
+axup <command> [flags] [args]
 ```
 
 Top-level commands:
 
 | Command | Purpose |
 |---|---|
-| `deploy bootstrap` | Run the rulebook's `bootstrap:` tasks on one or more hosts |
-| `deploy deploy` | Run the rulebook's `deploy:` tasks on one or more hosts |
-| `deploy run <phase>` | Run any named phase (incl. custom phases like `deploy_crash`, `migrate`) |
-| `deploy logs <svc>...` | Tail logs of one or more services declared in `services:` |
-| `deploy status` | Report each host's recorded state and any drift, read-only |
-| `deploy init` | Scaffold a stub `rulebook.yaml` in the current directory |
-| `deploy deps tidy` | Resolve `deps:` to fresh SHAs and rewrite `deploy.lock` |
-| `deploy deps verify` | Check that `deploy.lock` matches the declared deps |
-| `deploy secrets encrypt` | Age-encrypt a file (or every declared file) |
-| `deploy secrets decrypt` | Print a decrypted file to stdout |
-| `deploy secrets edit` | Decrypt → `$EDITOR` → encrypt cycle |
-| `deploy secrets status` | Report encrypted / plaintext / missing state of declared secret files |
-| `deploy version` | Print the binary version |
-| `deploy help [command]` | Help for a specific command |
+| `axup bootstrap` | Run the rulebook's `bootstrap:` tasks on one or more hosts |
+| `axup deploy` | Run the rulebook's `deploy:` tasks on one or more hosts |
+| `axup run <phase>` | Run any named phase (incl. custom phases like `deploy_crash`, `migrate`) |
+| `axup logs <svc>...` | Tail logs of one or more services declared in `services:` |
+| `axup status` | Report each host's recorded state and any drift, read-only |
+| `axup init` | Scaffold a stub `rulebook.yaml` in the current directory |
+| `axup deps tidy` | Resolve `deps:` to fresh SHAs and rewrite `axup.lock` |
+| `axup deps verify` | Check that `axup.lock` matches the declared deps |
+| `axup secrets encrypt` | Age-encrypt a file (or every declared file) |
+| `axup secrets decrypt` | Print a decrypted file to stdout |
+| `axup secrets edit` | Decrypt → `$EDITOR` → encrypt cycle |
+| `axup secrets status` | Report encrypted / plaintext / missing state of declared secret files |
+| `axup version` | Print the binary version |
+| `axup help [command]` | Help for a specific command |
 
 ## Persistent flags
 
@@ -49,7 +49,7 @@ These work on every subcommand:
 
 The three SSH auth flags are independent — pick none, one, or several:
 
-- **None given**: `deploy` tries the ssh-agent socket (`$SSH_AUTH_SOCK`) first,
+- **None given**: `axup` tries the ssh-agent socket (`$SSH_AUTH_SOCK`) first,
   then walks `~/.ssh/id_ed25519`, `id_rsa`, `id_ecdsa` for unencrypted private
   keys.
 - **`--key PATH`** is set: ONLY that key is tried. Auto-discovery is skipped.
@@ -76,11 +76,11 @@ auto-disabled when:
 - the `NO_COLOR` environment variable is set to any non-empty value
 - `--no-color` is passed
 
-## `deploy bootstrap` / `deploy deploy`
+## `axup bootstrap` / `axup deploy`
 
 ```
-deploy bootstrap [flags]
-deploy deploy [flags]
+axup bootstrap [flags]
+axup deploy [flags]
 ```
 
 Local flags (same for both):
@@ -99,33 +99,33 @@ Exactly one of `--host` or `--group` is required. See
 
 ```sh
 # Single ad-hoc host
-deploy bootstrap --host root@1.2.3.4
+axup bootstrap --host root@1.2.3.4
 
 # By inventory name
-deploy deploy --host prod-1
+axup deploy --host prod-1
 
 # Whole group, parallel
-deploy deploy --group prod
+axup deploy --group prod
 
 # Preview only
-deploy bootstrap --check --host root@1.2.3.4
+axup bootstrap --check --host root@1.2.3.4
 
 # Custom key + sudo with prompted password
-deploy deploy --key ~/.ssh/deploy_rsa --ask-sudo-password --host deploybot@server
+axup deploy --key ~/.ssh/deploy_rsa --ask-sudo-password --host deploybot@server
 
 # Different rulebook
-deploy deploy --rulebook ./prod/rulebook.yaml --host prod-1
+axup deploy --rulebook ./prod/rulebook.yaml --host prod-1
 ```
 
-## `deploy run`
+## `axup run`
 
 ```
-deploy run <phase> [flags]
+axup run <phase> [flags]
 ```
 
 Runs any phase from the rulebook against the chosen host(s). A rulebook
 can declare arbitrary top-level keys alongside `bootstrap:` / `deploy:`
-— each is a phase, runnable with `deploy run`:
+— each is a phase, runnable with `axup run`:
 
 ```yaml
 # rulebook.yaml
@@ -136,25 +136,25 @@ migrate:      [...]
 ```
 
 ```sh
-deploy run deploy_crash --group stage         # only push the game modules
-deploy run migrate --host prod-1              # run migrations on one host
-deploy run deploy --check --group prod        # equivalent to `deploy deploy --check`
+axup run deploy_crash --group stage         # only push the game modules
+axup run migrate --host prod-1              # run migrations on one host
+axup run axup --check --group prod        # equivalent to `axup deploy --check`
 ```
 
 Phase names must match `^[a-z][a-z0-9_-]*$` and cannot be `status` /
 `tasks` / `services` / `logs` (CLI-reserved). All phases of one
-rulebook share `~/.deploy-state/<name>/state.json` on the remote — a
+rulebook share `~/.axup-state/<name>/state.json` on the remote — a
 file written by `bootstrap` is "in sync" when a later `deploy_crash`
 references the same path.
 
-Local flags: same as `deploy bootstrap` / `deploy deploy`
+Local flags: same as `axup bootstrap` / `axup deploy`
 (`--host`, `--group`, `--rulebook`, `--vars`).
 
-## `deploy logs`
+## `axup logs`
 
 ```
-deploy logs <service> [<service>...] [flags]
-deploy logs --list [flags]
+axup logs <service> [<service>...] [flags]
+axup logs --list [flags]
 ```
 
 Tails files declared in the rulebook's `services:` block over SSH, in
@@ -173,7 +173,7 @@ Local flags:
 | `--no-follow` | `false` | Snapshot mode — print and exit; no `tail -F`. |
 | `--list` | `false` | Print declared services + paths and exit. No SSH. |
 
-`deploy logs` invokes `tail -n N -q [-F] <path1> <path2> …` in one SSH
+`axup logs` invokes `tail -n N -q [-F] <path1> <path2> …` in one SSH
 session per host. `-q` suppresses the per-file `==> path <==` header
 that tail emits when multiple paths are tailed together — service
 attribution comes from the log content itself (slog's `service=` field
@@ -181,22 +181,22 @@ in JSON output, etc).
 
 ```sh
 # Snapshot of the last 200 lines of crash, no streaming
-deploy logs crash --host stage-1 -n 200 --no-follow
+axup logs crash --host stage-1 -n 200 --no-follow
 
 # Stream billing + supervisord master log on every prod host
-deploy logs billing supervisor --group prod
+axup logs billing supervisor --group prod
 
 # Discover what's declared
-deploy logs --list
+axup logs --list
 ```
 
 Ctrl-C closes every SSH session and the corresponding remote `tail`
 exits cleanly.
 
-## `deploy status`
+## `axup status`
 
 Read-only mode. Connects to each host, asks the agent to read
-`~/.deploy-state/<rulebook>/state.json`, and reports each tracked file's
+`~/.axup-state/<rulebook>/state.json`, and reports each tracked file's
 status:
 
 | Status | Meaning |
@@ -206,31 +206,31 @@ status:
 | `missing` | State knows the file, but it's no longer on disk |
 
 ```sh
-deploy status --host root@server
-deploy status --group prod
+axup status --host root@server
+axup status --group prod
 ```
 
-Same flags as `bootstrap` / `deploy` (minus phase-related ones). State is
+Same flags as `bootstrap` / `axup` (minus phase-related ones). State is
 never rewritten in this mode.
 
-## `deploy init`
+## `axup init`
 
 ```
-deploy init
+axup init
 ```
 
 Writes a stub `rulebook.yaml` in the current directory. Fails if the file
 already exists.
 
-## `deploy deps tidy` / `deploy deps verify`
+## `axup deps tidy` / `axup deps verify`
 
 ```
-deploy deps tidy [--rulebook PATH]
-deploy deps verify [--rulebook PATH]
+axup deps tidy [--rulebook PATH]
+axup deps verify [--rulebook PATH]
 ```
 
 `tidy` resolves every entry in `deps:` against the remote via `git ls-remote`,
-clones each into the cache, and writes a fresh `deploy.lock` next to the
+clones each into the cache, and writes a fresh `axup.lock` next to the
 rulebook.
 
 `verify` does not touch the network: it just compares the rulebook's `deps:`
@@ -238,13 +238,13 @@ to the lock and reports drift. Useful as a CI guardrail.
 
 See [external-rulebooks.md](external-rulebooks.md) for the full workflow.
 
-## `deploy secrets …`
+## `axup secrets …`
 
 ```
-deploy secrets encrypt [FILE] [--rulebook PATH]
-deploy secrets decrypt FILE   [--rulebook PATH]
-deploy secrets edit    FILE   [--rulebook PATH]
-deploy secrets status         [--rulebook PATH]
+axup secrets encrypt [FILE] [--rulebook PATH]
+axup secrets decrypt FILE   [--rulebook PATH]
+axup secrets edit    FILE   [--rulebook PATH]
+axup secrets status         [--rulebook PATH]
 ```
 
 | Subcommand | Behavior |
@@ -258,15 +258,15 @@ deploy secrets status         [--rulebook PATH]
 `--rulebook` locates `recipients.txt` and reads the `secrets:` block.
 
 Identity for decryption is resolved by the same flag / env / discovery chain
-as `deploy bootstrap` — see the `--age-key` row above and
+as `axup bootstrap` — see the `--age-key` row above and
 [secrets.md](secrets.md) for the full story.
 
 ## Environment variables
 
 | Var | Effect |
 |---|---|
-| `DEPLOY_AGE_KEY` | Colon-separated list of age identity files (alternative to `--age-key`). |
-| `EDITOR` | Editor used by `deploy secrets edit`. Defaults to `vi`. |
+| `AXUP_AGE_KEY` | Colon-separated list of age identity files (alternative to `--age-key`). |
+| `EDITOR` | Editor used by `axup secrets edit`. Defaults to `vi`. |
 | `NO_COLOR` | When set (any non-empty value), disables ANSI colors. |
 | `SSH_AUTH_SOCK` | Standard SSH agent socket; honored when no `--key` is given. |
 
@@ -276,14 +276,14 @@ as `deploy bootstrap` — see the `--age-key` row above and
 |---|---|
 | `~/.ssh/known_hosts` | Host key verification; auto-falls back to insecure-ignore if missing |
 | `~/.ssh/id_ed25519`, `id_rsa`, `id_ecdsa` | SSH auth fallback when ssh-agent / `--key` are absent |
-| `~/.config/age/keys.txt` | Age identity fallback when `--age-key` / `$DEPLOY_AGE_KEY` are absent |
+| `~/.config/age/keys.txt` | Age identity fallback when `--age-key` / `$AXUP_AGE_KEY` are absent |
 
 ## Files the CLI manages in your project
 
 | Path | When |
 |---|---|
 | `rulebook.yaml` | Always |
-| `deploy.lock` | Created/updated by `deploy deps tidy`; auto-written when deps are present but no lock exists |
+| `axup.lock` | Created/updated by `axup deps tidy`; auto-written when deps are present but no lock exists |
 | `inventory.yaml` | Optional; auto-detected next to `rulebook.yaml` |
 | `recipients.txt` (or what `secrets.recipients_file` points to) | Required for `secrets encrypt` / `secrets edit` |
 | `secrets/*.yaml` | The encrypted secret payloads referenced from `creds_file:` / `password_file:` |
@@ -292,8 +292,8 @@ as `deploy bootstrap` — see the `--age-key` row above and
 
 | Path | Purpose |
 |---|---|
-| `/tmp/deployd-<rand>` | Uploaded agent binary; removed at end of every run |
-| `~/.deploy-state/<rulebook-name>/state.json` | sha256 + mode of every managed file (under root's home when sudo is used) |
+| `/tmp/axupd-<rand>` | Uploaded agent binary; removed at end of every run |
+| `~/.axup-state/<rulebook-name>/state.json` | sha256 + mode of every managed file (under root's home when sudo is used) |
 
 ## Wire protocol
 

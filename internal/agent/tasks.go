@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/axgrid/deploy/internal/protocol"
+	"github.com/axgrid/axup/internal/protocol"
 )
 
 const defaultFileMode os.FileMode = 0o644

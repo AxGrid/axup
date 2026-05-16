@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/axgrid/deploy/internal/protocol"
+	"github.com/axgrid/axup/internal/protocol"
 )
 
 func runDockerLoginTask(ctx *runCtx, t protocol.Task) protocol.Event {

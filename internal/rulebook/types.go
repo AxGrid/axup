@@ -13,12 +13,12 @@ type Rulebook struct {
 	Deps     []DepSpec          `yaml:"deps,omitempty"`     // top-level only
 	Tasks    []Task             `yaml:"tasks,omitempty"`    // module form: a single reusable list
 	Secrets  *SecretsSpec       `yaml:"secrets,omitempty"`  // declarative encrypted-files list
-	Services map[string]Service `yaml:"services,omitempty"` // catalog used by `deploy logs <name>`
+	Services map[string]Service `yaml:"services,omitempty"` // catalog used by `axup logs <name>`
 
 	// Phases captures every top-level key that isn't one of the reserved
 	// fields above — `bootstrap:`, `deploy:`, `deploy_crash:`, `migrate:`,
 	// any user-defined name (regex ^[a-z][a-z0-9_-]*$). The CLI dispatches
-	// via `deploy bootstrap`, `deploy deploy`, or `deploy run <phase>`.
+	// via `axup bootstrap`, `axup deploy`, or `axup run <phase>`.
 	Phases map[string][]Task `yaml:",inline"`
 
 	// Dir is the directory containing the rulebook.yaml, used to resolve
@@ -26,7 +26,7 @@ type Rulebook struct {
 	Dir string `yaml:"-"`
 }
 
-// Service is a catalog entry consumed by `deploy logs <name>`. It does
+// Service is a catalog entry consumed by `axup logs <name>`. It does
 // NOT manage the running process — that's still `task.Service` (systemd
 // /supervisor). This is purely informational: "where are this service's
 // logs on the remote".
@@ -38,10 +38,10 @@ type Service struct {
 // special-case dispatch — users can't define a rulebook phase with these
 // names because it'd collide with the dispatch logic.
 var reservedPhaseNames = map[string]struct{}{
-	"status":   {}, // `deploy status` walks state.json, not a real phase
+	"status":   {}, // `axup status` walks state.json, not a real phase
 	"tasks":    {}, // module-form key; lives in its own struct field
 	"services": {}, // catalog block; lives in its own struct field
-	"logs":     {}, // `deploy logs` subcommand
+	"logs":     {}, // `axup logs` subcommand
 }
 
 // Phase returns the task list for `name`, or nil if no such phase exists.
@@ -55,7 +55,7 @@ func (r *Rulebook) Phase(name string) []Task {
 }
 
 // PhaseNames returns the declared phase names, sorted, so error messages
-// and `deploy status` / scaffold output are stable.
+// and `axup status` / scaffold output are stable.
 func (r *Rulebook) PhaseNames() []string {
 	out := make([]string, 0, len(r.Phases))
 	for k := range r.Phases {
@@ -67,8 +67,8 @@ func (r *Rulebook) PhaseNames() []string {
 
 // SecretsSpec declares which files in the project are managed by `deploy
 // secrets` (encrypt in place against the recipients listed in recipients.txt).
-// Used by `deploy secrets encrypt` (no args) to iterate the list and by
-// `deploy secrets status` to surface plaintext-leftover problems.
+// Used by `axup secrets encrypt` (no args) to iterate the list and by
+// `axup secrets status` to surface plaintext-leftover problems.
 //
 // The runtime decrypt path (when a task reads a creds_file / password_file) is
 // independent — it auto-detects ciphertext by content, regardless of whether

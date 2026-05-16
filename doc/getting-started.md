@@ -10,31 +10,31 @@ container running on your server, in about five minutes. You will need:
 ## 1. Build the CLI
 
 `make` cross-compiles the remote agent for `linux/amd64` and `linux/arm64`,
-embeds both binaries into the CLI, and writes the final binary to `bin/deploy`:
+embeds both binaries into the CLI, and writes the final binary to `bin/axup`:
 
 ```
 cd /path/to/this/repo
 make
 ```
 
-You can put `bin/deploy` somewhere on your `$PATH` if you want:
+You can put `bin/axup` somewhere on your `$PATH` if you want:
 
 ```
-sudo install bin/deploy /usr/local/bin/deploy
-deploy version
+sudo install bin/axup /usr/local/bin/axup
+axup version
 ```
 
-The rest of this guide uses `deploy` as if it were on `$PATH`. Substitute
-`./bin/deploy` if you skipped the install step.
+The rest of this guide uses `axup` as if it were on `$PATH`. Substitute
+`./bin/axup` if you skipped the install step.
 
 ## 2. Scaffold a project
 
-Pick a directory for your project and run `deploy init`. It writes a stub
+Pick a directory for your project and run `axup init`. It writes a stub
 `rulebook.yaml` that you'll fill in next.
 
 ```
 mkdir ~/projects/myapi && cd ~/projects/myapi
-deploy init
+axup init
 cat rulebook.yaml
 ```
 
@@ -128,14 +128,14 @@ the [sprig](https://masterminds.github.io/sprig/) helper functions.
 ## 4. Bootstrap the server
 
 ```
-deploy bootstrap --host root@your-server.example.com
+axup bootstrap --host root@your-server.example.com
 ```
 
 You should see output like:
 
 ```
 [root@your-server.example.com] arch=amd64
-[root@your-server.example.com] agent uploaded (2 MB → /tmp/deployd-…)
+[root@your-server.example.com] agent uploaded (2 MB → /tmp/axupd-…)
 [root@your-server.example.com] ▶ install prereqs (bootstrap.1)
 [root@your-server.example.com]   ✓ status=changed
 [root@your-server.example.com] ▶ install docker (bootstrap.2)
@@ -147,13 +147,13 @@ You should see output like:
 ```
 
 `status=changed` means the task did work; `status=skipped` means the system
-was already in the desired state. Run `deploy bootstrap …` again — you should
+was already in the desired state. Run `axup bootstrap …` again — you should
 see every task skipped this time, because the server is already converged.
 
 ## 5. Deploy the project
 
 ```
-deploy deploy --host root@your-server.example.com
+axup deploy --host root@your-server.example.com
 ```
 
 After the first run there's a `/opt/myapi/docker-compose.yml` on the server
@@ -165,12 +165,12 @@ ssh root@your-server.example.com 'docker ps --filter name=myapi-redis'
 
 ## 6. Check status
 
-`deploy status` is a read-only mode: it reads the agent's state file on the
+`axup status` is a read-only mode: it reads the agent's state file on the
 server and reports whether every file the CLI has ever written is still there
 with the right content.
 
 ```
-deploy status --host root@your-server.example.com
+axup status --host root@your-server.example.com
 ```
 
 You should see:
@@ -185,15 +185,15 @@ You should see:
 ```
 
 Try drifting it: edit the file out-of-band on the server, then re-run
-`deploy status` — you'll see `status=drift` instead of `in_sync`. Run
-`deploy deploy …` again and the file is restored.
+`axup status` — you'll see `status=drift` instead of `in_sync`. Run
+`axup deploy …` again and the file is restored.
 
 ## 7. Preview changes without applying them
 
 Add `--check` (alias `--dry-run`) to any `bootstrap` or `deploy` invocation:
 
 ```
-deploy deploy --check --host root@your-server.example.com
+axup deploy --check --host root@your-server.example.com
 ```
 
 Each task that would have changed something reports `status=would_change`;
@@ -206,17 +206,17 @@ username and add the sudo flags:
 
 ```
 # NOPASSWD sudo
-deploy bootstrap --host deploybot@server --sudo
+axup bootstrap --host deploybot@server --sudo
 
 # sudo with a password
-deploy bootstrap --host deploybot@server --ask-sudo-password
+axup bootstrap --host deploybot@server --ask-sudo-password
 ```
 
 If you want to use a specific SSH key that isn't picked up by your
 ssh-agent:
 
 ```
-deploy bootstrap --key ~/.ssh/deploy_rsa --host deploybot@server
+axup bootstrap --key ~/.ssh/deploy_rsa --host deploybot@server
 ```
 
 Full auth surface lives in [cli-reference.md](cli-reference.md#auth-flags).

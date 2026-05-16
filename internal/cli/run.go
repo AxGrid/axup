@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/axgrid/deploy/internal/runner"
+	"github.com/axgrid/axup/internal/runner"
 )
 
 var (
@@ -28,7 +28,7 @@ built-in 'bootstrap:' and 'deploy:'. Example:
   deploy_crash: [...]
   migrate:      [...]
 
-` + "`" + `deploy run deploy_crash` + "`" + ` runs the deploy_crash phase only.
+` + "`" + `axup run deploy_crash` + "`" + ` runs the deploy_crash phase only.
 Phase names must match ^[a-z][a-z0-9_-]*$ and cannot be 'status' or 'tasks'
 (both are reserved by the CLI).`,
 	Args: cobra.ExactArgs(1),

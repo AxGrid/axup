@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/axgrid/deploy/internal/protocol"
+	"github.com/axgrid/axup/internal/protocol"
 )
 
 // Execute runs a CLI-local task. Output streams to os.Stdout/Stderr so the

@@ -9,8 +9,8 @@ import (
 	"filippo.io/age"
 	"github.com/spf13/cobra"
 
-	"github.com/axgrid/deploy/internal/rulebook"
-	"github.com/axgrid/deploy/internal/secrets"
+	"github.com/axgrid/axup/internal/rulebook"
+	"github.com/axgrid/axup/internal/secrets"
 )
 
 var secretsRulebook string
@@ -23,7 +23,7 @@ next to the rulebook. The optional secrets: block in rulebook.yaml
 lists which files are encrypted and lets `+"`encrypt`"+` and `+"`status`"+`
 operate on the whole set.
 
-Decryption uses the auto-discovered identity (--age-key, $DEPLOY_AGE_KEY,
+Decryption uses the auto-discovered identity (--age-key, $AXUP_AGE_KEY,
 ~/.config/age/keys.txt, or ~/.ssh/id_*).`,
 }
 

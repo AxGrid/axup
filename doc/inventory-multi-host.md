@@ -1,6 +1,6 @@
 # Inventory and multi-host
 
-For one-off runs, `deploy bootstrap --host root@1.2.3.4` is enough. When you
+For one-off runs, `axup bootstrap --host root@1.2.3.4` is enough. When you
 have a fleet — even of two — declare them once in `inventory.yaml` and
 address them by name.
 
@@ -83,16 +83,16 @@ hosts:
 ```
 
 ```
-deploy deploy --group all
+axup deploy --group all
 ```
 
 Each host receives a `.env` rendered with its own `env` and `db_host`.
 
 ## Parallel execution
 
-`--group` runs hosts in parallel. Under the hood `deploy` uses
+`--group` runs hosts in parallel. Under the hood `axup` uses
 `golang.org/x/sync/errgroup`: each host gets its own goroutine, its own SSH
-session, its own `/tmp/deployd-<rand>`, its own remote state. The first error
+session, its own `/tmp/axupd-<rand>`, its own remote state. The first error
 cancels the group — but goroutines that are already inside `RunAgent` finish
 their current task before they stop.
 
@@ -118,17 +118,17 @@ visually:
 ## Local-task behavior in multi-host runs
 
 CLI-local tasks (`docker_build`, `docker_login` with `location: local`) run
-**once per `deploy` invocation**, using the FIRST host's vars. They are
+**once per `axup` invocation**, using the FIRST host's vars. They are
 assumed to be host-invariant — the typical workflow is "build one image, push
 once, every host pulls the same tag". If you need a genuinely different build
-per host, run `deploy deploy --host <h>` separately for each.
+per host, run `axup deploy --host <h>` separately for each.
 
 Remote tasks (everything else) fan out — each host gets its own Plan built
 from its own merged var context.
 
 ## A note on shared state files
 
-The agent's state file lives at `~/.deploy-state/<rulebook_name>/state.json`
+The agent's state file lives at `~/.axup-state/<rulebook_name>/state.json`
 on the remote. If two logical inventory hosts point at the SAME physical
 server (e.g., during local testing), they share a single state file. Writing
 DIFFERENT paths is fine — both end up as separate keys. Writing the SAME path
@@ -143,8 +143,8 @@ debugging or one-off boxes) without touching the inventory:
 
 ```
 # uses inventory.hosts["prod-1"].user / .address / .vars
-deploy deploy --host prod-1
+axup deploy --host prod-1
 
 # bypasses inventory entirely — rulebook vars are the only vars
-deploy deploy --host root@new-box.example.com
+axup deploy --host root@new-box.example.com
 ```

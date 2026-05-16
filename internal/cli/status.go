@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/axgrid/deploy/internal/runner"
+	"github.com/axgrid/axup/internal/runner"
 )
 
 var (
@@ -15,7 +15,7 @@ var (
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Report each host's recorded state and any drift from it",
-	Long: `Connects to one or more configured hosts, reads /root/.deploy-state/<rulebook>/state.json,
+	Long: `Connects to one or more configured hosts, reads /root/.axup-state/<rulebook>/state.json,
 and reports each tracked file's status (in_sync / drift / missing).
 
 The agent runs in read-only mode — no changes are applied and the state file

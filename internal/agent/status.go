@@ -5,7 +5,7 @@ import (
 	"os"
 	"sort"
 
-	"github.com/axgrid/deploy/internal/protocol"
+	"github.com/axgrid/axup/internal/protocol"
 )
 
 // emitStatus walks the loaded state and emits one synthetic task_end event

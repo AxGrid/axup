@@ -12,7 +12,7 @@ import (
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 // phaseNameRe is intentionally stricter than nameRe — phase names are
-// CLI arguments (`deploy run <phase>`) and YAML keys, so lower-snake
+// CLI arguments (`axup run <phase>`) and YAML keys, so lower-snake
 // keeps them shell-friendly and consistent with bootstrap/deploy.
 var phaseNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
@@ -171,7 +171,7 @@ func loadInternal(path string, o LoadOptions) (*Rulebook, error) {
 	return &rb, nil
 }
 
-// resolveDepsForLoad reconciles the rulebook's deps[] against deploy.lock,
+// resolveDepsForLoad reconciles the rulebook's deps[] against axup.lock,
 // clones any missing repos to the cache, and returns dep_name → local_path.
 // If reconciliation discovered a missing/new dep, the lock is written back so
 // the next run is fully reproducible.

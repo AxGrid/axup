@@ -5,21 +5,21 @@ For end-user docs see [README.md](README.md) and [doc/](doc/).
 
 ## What this is
 
-`deploy` is a single Go binary that reads YAML rulebooks and applies them to
-Linux servers over SSH. The CLI uploads an embedded `deployd` agent into
+`axup` is a single Go binary that reads YAML rulebooks and applies them to
+Linux servers over SSH. The CLI uploads an embedded `axupd` agent into
 `/tmp` on every run, pipes a JSON plan into its stdin, reads newline-delimited
-events from stdout, and the agent maintains `~/.deploy-state/<rulebook>/state.json`
+events from stdout, and the agent maintains `~/.axup-state/<rulebook>/state.json`
 on the remote so re-runs are idempotent (sha256 diffs on file contents + mode).
 
 Two binaries, one repo:
 
 ```
-cmd/deploy/main.go       CLI shipped to developers (~12 MB, embeds the agent)
-cmd/deployd/main.go      Remote agent cross-compiled for linux/amd64+arm64 (~2.3 MB)
+cmd/axup/main.go       CLI shipped to developers (~12 MB, embeds the agent)
+cmd/axupd/main.go      Remote agent cross-compiled for linux/amd64+arm64 (~2.3 MB)
 ```
 
 `make` cross-compiles both agent variants, places them in `internal/agentbin/bin/`,
-then builds the CLI with `//go:embed bin/deployd-linux-*` picking them up.
+then builds the CLI with `//go:embed bin/axupd-linux-*` picking them up.
 The order matters — building the CLI without the agents present fails the embed.
 
 ## Architecture map
@@ -27,7 +27,7 @@ The order matters — building the CLI without the agents present fails the embe
 ```
 cmd/
 ├── deploy/main.go             CLI entrypoint; wires cli.Execute
-└── deployd/main.go            Agent entrypoint; calls agent.Run(stdin, stdout)
+└── axupd/main.go            Agent entrypoint; calls agent.Run(stdin, stdout)
 
 internal/
 ├── cli/                       cobra subcommands (one file per command)
@@ -48,7 +48,7 @@ internal/
 │   ├── render.go              text/template + sprig; renderString, expandTaskStrings
 │   ├── git.go                 git_sha / git_short_sha / git_branch / git_dirty auto-vars
 │   ├── deps.go                external deps git resolver + cache layout
-│   ├── lock.go                deploy.lock load/save/reconcile
+│   ├── lock.go                axup.lock load/save/reconcile
 │   ├── expand.go              use: inlining + cycle detection
 │   └── creds.go               docker_login creds_file loader (incl. age decrypt)
 │
@@ -78,7 +78,7 @@ internal/
 │   ├── state.go               state.json load/save (atomic write)
 │   └── status.go              StatusOnly mode (emitStatus)
 │
-└── agentbin/                  go:embed of cross-built deployd binaries
+└── agentbin/                  go:embed of cross-built axupd binaries
     ├── embed.go
     └── bin/                   populated by `make agent` (gitignored)
 ```
@@ -102,12 +102,12 @@ migrate:      [...]      # → rb.Phases["migrate"]
 Phase names must match `^[a-z][a-z0-9_-]*$` and cannot be `status` or
 `tasks` (both CLI-reserved). The CLI dispatches with:
 
-- `deploy bootstrap` — runs `bootstrap:` (backward-compat alias)
-- `deploy deploy` — runs `deploy:` (backward-compat alias)
-- `deploy run <phase>` — runs any phase (incl. bootstrap/deploy)
+- `axup bootstrap` — runs `bootstrap:` (backward-compat alias)
+- `axup deploy` — runs `deploy:` (backward-compat alias)
+- `axup run <phase>` — runs any phase (incl. bootstrap/deploy)
 
 All three flow through the same `runner.Run`. State on the remote lives
-at `~/.deploy-state/<rulebook_name>/state.json` — every phase of the
+at `~/.axup-state/<rulebook_name>/state.json` — every phase of the
 same rulebook shares one state file: a `copy:` dst written by
 `bootstrap` is "in sync" when a later `deploy_crash` runs and references
 the same path. If you want isolated state, give each rulebook a
@@ -124,10 +124,10 @@ Relative `--vars` paths resolve against CWD first, then against the
 rulebook's directory (so `--vars vars.yaml` works regardless of where
 the CLI was invoked from, as long as the file sits next to the rulebook).
 
-## Services catalog + `deploy logs`
+## Services catalog + `axup logs`
 
 The optional top-level `services:` block declares a name → log paths
-map that `deploy logs <name> [<name>...]` uses to tail files over SSH:
+map that `axup logs <name> [<name>...]` uses to tail files over SSH:
 
 ```yaml
 services:
@@ -143,7 +143,7 @@ The catalog is purely informational — it does NOT manage processes
 under `rb.Services map[string]Service` and is reserved (won't fall
 into `Phases` even though it's a top-level key).
 
-`deploy logs` opens one SSH session per resolved host, runs
+`axup logs` opens one SSH session per resolved host, runs
 `tail -n N -q [-F] /path1 /path2 …`, and forwards stdout line-by-line
 with `[host]` prefix. Defaults: `-n 20 -F`. Cancellation closes the
 session — local Ctrl-C kills the remote `tail`.
@@ -171,7 +171,7 @@ Sudo flow: when `--sudo` or `--sudo-password` is set, `RunAgent` prefixes
 the remote command with `sudo -H -S -p ''`. The sudo password (if any) is
 written to stdin BEFORE the Plan JSON; sudo consumes the first line, the
 agent reads the rest. `-H` keeps `$HOME=/root` so state lives at
-`/root/.deploy-state/...` regardless of the SSH login user.
+`/root/.axup-state/...` regardless of the SSH login user.
 
 ## How to add a new task type
 
@@ -193,7 +193,7 @@ Touch all of:
 4. **`internal/rulebook/render.go`** — if the spec has any user-facing
    strings, add them to `expandTaskStrings` so `{{ .var }}` resolves. **Don't
    forget src paths** if there are file references (we have a history of
-   missing those — see [commit b5ee754](https://github.com/axgrid/deploy/commit/b5ee754)).
+   missing those — see [commit b5ee754](https://github.com/AxGrid/axup/commit/b5ee754)).
 
 5. **`internal/runner/runner.go`** — add a `case "firewall":` branch in
    `buildPlans` to translate the rulebook task into a `protocol.Task`.
@@ -266,8 +266,8 @@ Touch all of:
 ## Build, test, verify
 
 ```sh
-make                # cross-build agent + CLI; produces ./bin/deploy
-make agent          # just the agent binaries (internal/agentbin/bin/deployd-linux-*)
+make                # cross-build agent + CLI; produces ./bin/axup
+make agent          # just the agent binaries (internal/agentbin/bin/axupd-linux-*)
 go build ./...      # quick "does it compile" check (CLI build fails without the agents)
 ```
 
@@ -279,23 +279,23 @@ Typical smoke test for a new task type:
 
 ```sh
 make
-ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.deploy-state/<name>'
-./bin/deploy bootstrap --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml
-./bin/deploy bootstrap --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml  # 2nd run — expect skipped
-./bin/deploy status    --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml
-./bin/deploy bootstrap --check --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml
+ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.axup-state/<name>'
+./bin/axup bootstrap --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml
+./bin/axup bootstrap --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml  # 2nd run — expect skipped
+./bin/axup status    --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml
+./bin/axup bootstrap --check --host root@cert2.axgrid.com --rulebook examples/<name>/rulebook.yaml
 ```
 
 Cleanup pattern at the end of a session:
 
 ```sh
-ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.deploy-state/<name>'
+ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.axup-state/<name>'
 ```
 
 ## Common gotchas
 
 - **`go:embed` requires the bin/ to exist at build time.** Running
-  `go build ./cmd/deploy` without first building the agent fails. `make`
+  `go build ./cmd/axup` without first building the agent fails. `make`
   handles the ordering. There are 0-byte placeholder files committed so
   embed at least finds something — the CLI errors at runtime with "agent
   binary for amd64 not built" if you forgot `make agent`.
@@ -329,7 +329,7 @@ ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.deploy-state/<name>'
 - **State path uses HOME, sudo needs -H.** When `--sudo` is used, the
   agent runs as root but `$HOME` is preserved from the invoking user
   unless `sudo -H` is set. We always use `-H` so state lives at
-  `/root/.deploy-state/...`.
+  `/root/.axup-state/...`.
 
 ## Where to look first
 

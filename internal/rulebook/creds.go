@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/axgrid/deploy/internal/secrets"
+	"github.com/axgrid/axup/internal/secrets"
 )
 
 // DockerCreds is the on-disk format for a docker_login creds_file. Plain YAML

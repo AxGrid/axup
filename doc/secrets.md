@@ -1,6 +1,6 @@
 # Secrets
 
-The `deploy` CLI encrypts per-project secret files (registry passwords,
+The `axup` CLI encrypts per-project secret files (registry passwords,
 private keys, anything you don't want committed in plaintext) using
 [age](https://age-encryption.org/). Public keys live in the repo;
 decryption happens transparently at deploy time from whichever identity the
@@ -55,10 +55,10 @@ secrets:
     - secrets/db.pw
 ```
 
-The block is optional. With it, `deploy secrets encrypt` (no args) operates
-on the whole declared set, and `deploy secrets status` reports the state of
+The block is optional. With it, `axup secrets encrypt` (no args) operates
+on the whole declared set, and `axup secrets status` reports the state of
 every file (encrypted / plaintext / missing). Without it, you encrypt files
-one at a time by passing each path to `deploy secrets encrypt FILE`.
+one at a time by passing each path to `axup secrets encrypt FILE`.
 
 ## CLI commands
 
@@ -73,43 +73,43 @@ If you'd rather reuse your existing SSH key, skip `age-keygen`. The CLI will
 parse `~/.ssh/id_ed25519` / `id_rsa` / `id_ecdsa` as an age identity provided
 the SSH key is NOT passphrase-protected.
 
-### `deploy secrets encrypt`
+### `axup secrets encrypt`
 
 ```
 # encrypt every file declared in secrets.files
-deploy secrets encrypt --rulebook rulebook.yaml
+axup secrets encrypt --rulebook rulebook.yaml
 
 # encrypt a specific file
-deploy secrets encrypt secrets/db.pw
+axup secrets encrypt secrets/db.pw
 ```
 
 The output is age text-armored. Files that are already encrypted are skipped
 with a `skip` line; missing declared files cause exit 1 so a CI hook can flag
 them.
 
-### `deploy secrets decrypt`
+### `axup secrets decrypt`
 
 ```
-deploy secrets decrypt secrets/registry.com.yaml
+axup secrets decrypt secrets/registry.com.yaml
 ```
 
 Prints plaintext to stdout. Useful for piping into `cat`, `jq`, or grepping
 without leaving plaintext on disk.
 
-### `deploy secrets edit`
+### `axup secrets edit`
 
 ```
-deploy secrets edit secrets/registry.com.yaml
+axup secrets edit secrets/registry.com.yaml
 ```
 
 Decrypts the file into a temp path, opens it with `$EDITOR` (defaulting to
 `vi`), then encrypts the edited content back in place. Works on
 non-existent files too — useful for creating fresh encrypted content.
 
-### `deploy secrets status`
+### `axup secrets status`
 
 ```
-deploy secrets status --rulebook rulebook.yaml
+axup secrets status --rulebook rulebook.yaml
 ```
 
 Reports the on-disk state of every file declared in `secrets.files`:
@@ -130,18 +130,18 @@ pre-commit hook.
 
 ## Identity discovery (decryption)
 
-`deploy` finds the private key for decryption in this order. Each branch is
+`axup` finds the private key for decryption in this order. Each branch is
 "exclusive" — when it matches it doesn't fall through to the next:
 
 1. `--age-key PATH` flag — **repeatable**, so multiple keys can be specified
    in a single command:
    ```
-   deploy deploy --age-key ~/keys/alice.key --age-key ~/keys/bob.key --host root@server
+   axup deploy --age-key ~/keys/alice.key --age-key ~/keys/bob.key --host root@server
    ```
-2. `$DEPLOY_AGE_KEY` environment variable — colon-separated path list,
+2. `$AXUP_AGE_KEY` environment variable — colon-separated path list,
    like `$PATH`:
    ```
-   DEPLOY_AGE_KEY="/keys/alice.key:/keys/bob.key" deploy deploy --host …
+   AXUP_AGE_KEY="/keys/alice.key:/keys/bob.key" axup deploy --host …
    ```
 3. Auto-discovery (when none of the above is set) — accumulates from BOTH:
    - `~/.config/age/keys.txt` (which can itself contain multiple identities)
@@ -163,15 +163,15 @@ age-keygen -y ~/.config/age/keys.txt
 
 # Then a dev who already has decrypt access:
 echo "age1newdev… # alice@new-laptop" >> recipients.txt
-deploy secrets encrypt          # re-encrypts every file in secrets.files to the new recipient set
+axup secrets encrypt          # re-encrypts every file in secrets.files to the new recipient set
 git add recipients.txt secrets/
 git commit -m "add alice"
 
-# alice pulls, runs `deploy` — her auto-discovery finds ~/.config/age/keys.txt
+# alice pulls, runs `axup` — her auto-discovery finds ~/.config/age/keys.txt
 ```
 
 Removing a developer is symmetric: delete their line from `recipients.txt`,
-`deploy secrets encrypt` to rotate, commit. Note that historical commits
+`axup secrets encrypt` to rotate, commit. Note that historical commits
 still contain ciphertext their key can decrypt — if you need to revoke access
 to a specific value, rotate the underlying secret (e.g., generate a new
 registry token) rather than relying on rewriting history.
@@ -193,7 +193,7 @@ adopt a convention of encrypted files living somewhere outside `secrets/`
 - **The age library used is `filippo.io/age` v1.3.x** — pure Go, no
   external `age` binary needed at deploy time. (You'll want the
   `age-keygen` binary on your dev machine to mint keys, though.)
-- **State files (`.deploy-state/.../state.json`) are NOT encrypted** —
+- **State files (`.axup-state/.../state.json`) are NOT encrypted** —
   they live on the remote and contain sha256 digests and modes, not the
   plaintext content of any managed file. If you consider the file paths
   themselves sensitive, lock down the remote `/root` accordingly.

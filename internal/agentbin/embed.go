@@ -1,5 +1,5 @@
-// Package agentbin embeds the cross-compiled deployd binaries that ship inside
-// the deploy CLI. The Makefile builds them into ./bin/ before compiling the
+// Package agentbin embeds the cross-compiled axupd binaries that ship inside
+// the axup CLI. The Makefile builds them into ./bin/ before compiling the
 // CLI. Placeholder files exist so `go build` works without `make`, but the
 // resulting CLI will refuse to deploy until real binaries are present.
 package agentbin
@@ -9,10 +9,10 @@ import (
 	"fmt"
 )
 
-//go:embed bin/deployd-linux-amd64
+//go:embed bin/axupd-linux-amd64
 var linuxAmd64 []byte
 
-//go:embed bin/deployd-linux-arm64
+//go:embed bin/axupd-linux-arm64
 var linuxArm64 []byte
 
 // Binary returns the agent payload for the given GOARCH. Returns an error if

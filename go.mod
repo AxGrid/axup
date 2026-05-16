@@ -1,4 +1,4 @@
-module github.com/axgrid/deploy
+module github.com/axgrid/axup
 
 go 1.25.0
 

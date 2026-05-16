@@ -65,13 +65,13 @@ deps:
 SHA. The first time you load a rulebook with `deps:`, the CLI resolves
 `version` against the remote with `git ls-remote` to find the actual SHA.
 
-## `deploy.lock`
+## `axup.lock`
 
-The first run with `deps:` declared writes a `deploy.lock` next to the
+The first run with `deps:` declared writes a `axup.lock` next to the
 rulebook:
 
 ```yaml
-# deploy.lock — managed by `deploy deps tidy`. Do not edit by hand.
+# axup.lock — managed by `axup deps tidy`. Do not edit by hand.
 deps:
     - name: common
       git: github.com/me/deploy-rules
@@ -83,8 +83,8 @@ Subsequent runs use the locked SHA exclusively — no network resolution.
 Commit this file. To bump versions, edit `version:` in the rulebook, then:
 
 ```sh
-deploy deps tidy             # resolves to a new SHA and rewrites the lock
-deploy deps verify           # no-network check that the lock matches the rulebook
+axup deps tidy             # resolves to a new SHA and rewrites the lock
+axup deps verify           # no-network check that the lock matches the rulebook
 ```
 
 `tidy` is the only operation that talks to the remote; everything else uses
@@ -101,7 +101,7 @@ on macOS, `~/.cache/deploy` on Linux), keyed by host, sanitized path, and SHA:
 
 Different SHAs of the same repo coexist as sibling directories, so multiple
 projects pinned to different versions don't fight over the same clone. The
-cache is harmless to delete — `deploy` will re-clone on next use.
+cache is harmless to delete — `axup` will re-clone on next use.
 
 ## `use:` — inlining a module
 
@@ -197,11 +197,11 @@ loop:
 error: use "common/loopy-a": circular use: /…/cache/git/…/loopy-a/rulebook.yaml
 ```
 
-## `deploy deps` commands
+## `axup deps` commands
 
 ```
-deploy deps tidy         # resolve every dep from its `version:`, rewrite deploy.lock
-deploy deps verify       # check that the rulebook's deps match deploy.lock (no network)
+axup deps tidy         # resolve every dep from its `version:`, rewrite axup.lock
+axup deps verify       # check that the rulebook's deps match axup.lock (no network)
 ```
 
 `tidy` resolves over the network and writes a fresh lock file. `verify` is
@@ -210,16 +210,16 @@ offline-friendly and is what you want in CI to catch the
 
 ```
 DRIFT  common — rulebook=(git=github.com/me/deploy-rules, version=v1.5.0), lock=(git=github.com/me/deploy-rules, version=v1.4.2)
-error: 1 dep(s) need `deploy deps tidy`
+error: 1 dep(s) need `axup deps tidy`
 ```
 
-A regular `deploy bootstrap` / `deploy deploy` invocation also auto-resolves
+A regular `axup bootstrap` / `axup deploy` invocation also auto-resolves
 when the lock is missing — `tidy` becomes mandatory only when the lock
 exists and disagrees with the rulebook.
 
 ## Authentication for private deps
 
-`deploy` invokes the user's `git` binary directly, so any auth your shell can
+`axup` invokes the user's `git` binary directly, so any auth your shell can
 do, the CLI can do: ssh-agent, gitcredential helpers, `~/.netrc`, etc. The
 typical pattern for private GitHub/GitLab:
 
@@ -262,6 +262,6 @@ git tag v1.0.0
 
 # resolve and run
 cd /path/to/your/project
-deploy deps tidy --rulebook examples/use/rulebook.yaml
-deploy bootstrap --host root@your-server --rulebook examples/use/rulebook.yaml
+axup deps tidy --rulebook examples/use/rulebook.yaml
+axup bootstrap --host root@your-server --rulebook examples/use/rulebook.yaml
 ```

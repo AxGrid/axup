@@ -16,12 +16,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/axgrid/deploy/internal/agentbin"
-	"github.com/axgrid/deploy/internal/inventory"
-	"github.com/axgrid/deploy/internal/local"
-	"github.com/axgrid/deploy/internal/protocol"
-	"github.com/axgrid/deploy/internal/rulebook"
-	"github.com/axgrid/deploy/internal/transport"
+	"github.com/axgrid/axup/internal/agentbin"
+	"github.com/axgrid/axup/internal/inventory"
+	"github.com/axgrid/axup/internal/local"
+	"github.com/axgrid/axup/internal/protocol"
+	"github.com/axgrid/axup/internal/rulebook"
+	"github.com/axgrid/axup/internal/transport"
 )
 
 type Options struct {
@@ -35,7 +35,7 @@ type Options struct {
 	Sudo         bool   // wrap agent in sudo -H -S
 	SudoPassword string // optional: sudo password (empty = expect NOPASSWD)
 	DryRun       bool   // --check / --dry-run: preview only, no changes applied
-	StatusOnly   bool   // `deploy status` mode: skip local tasks, ask agent to report state drift
+	StatusOnly   bool   // `axup status` mode: skip local tasks, ask agent to report state drift
 }
 
 func Run(opts Options) error {
@@ -231,7 +231,7 @@ func runOnHost(opts Options, host inventory.Resolved, plan protocol.Plan) (faile
 	if err != nil {
 		return false, err
 	}
-	remotePath := "/tmp/deployd-" + suffix
+	remotePath := "/tmp/axupd-" + suffix
 	defer func() { _, _, _ = cli.Run("rm -f " + remotePath) }()
 
 	if err := cli.UploadBinary(bin, remotePath); err != nil {

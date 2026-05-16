@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// State is persisted to ~/.deploy-state/<rulebook>/state.json on the remote.
+// State is persisted to ~/.axup-state/<rulebook>/state.json on the remote.
 // It records what the agent has applied so it can skip unchanged files on the
 // next run.
 type State struct {
@@ -29,7 +29,7 @@ func statePath(rulebook string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".deploy-state", rulebook, "state.json"), nil
+	return filepath.Join(home, ".axup-state", rulebook, "state.json"), nil
 }
 
 func loadState(rulebook string) (*State, error) {
