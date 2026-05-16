@@ -1,10 +1,30 @@
 # Rulebook reference
 
-A rulebook is the YAML file (`rulebook.yaml` by convention) that drives a
+A rulebook is the YAML file (`rulebook.yaml` by convention) that drives an
 `axup` invocation. It declares the project's name, top-level variables,
 optional external dependencies, optional secrets layout, and two task lists:
 `bootstrap:` (called by `axup bootstrap`) and `deploy:` (called by
 `axup deploy`).
+
+## IDE support — JSON Schema
+
+A JSON Schema ships in [`schemas/rulebook.schema.json`](../schemas/rulebook.schema.json)
+and is published at
+`https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json`.
+The [yaml-language-server](https://github.com/redhat-developer/yaml-language-server)
+(VS Code's official YAML extension, JetBrains' YAML plugin, neovim's
+`vim-lsp`, …) picks it up from this header at the top of the file:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: my-app
+…
+```
+
+`axup init` writes that header automatically. Once it's present you get
+autocomplete on task types, validation of required fields (e.g. forgetting
+`dst:` on `copy:`), enum hints (`state: started|stopped|restarted|reloaded`),
+and inline docs on hover.
 
 ## Top-level structure
 

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/axgrid/axup/internal/protocol"
@@ -24,10 +25,11 @@ type runCtx struct {
 	state   *State
 	changed map[string]bool // paths written this run, keyed by absolute dst path
 	dryRun  bool            // when true, handlers report would_change but don't apply
+	diff    bool            // when true (with dryRun), file handlers attach a unified diff to would_change events
 }
 
-func newRunCtx(s *State, dryRun bool) *runCtx {
-	return &runCtx{state: s, changed: map[string]bool{}, dryRun: dryRun}
+func newRunCtx(s *State, dryRun, diff bool) *runCtx {
+	return &runCtx{state: s, changed: map[string]bool{}, dryRun: dryRun, diff: diff}
 }
 
 func runCommandTask(ctx *runCtx, t protocol.Task) protocol.Event {
@@ -131,7 +133,11 @@ func runFileTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		if exists {
 			msg = "would overwrite"
 		}
-		return protocol.Event{Status: protocol.StatusWouldChange, Path: t.DstPath, Message: msg}
+		ev := protocol.Event{Status: protocol.StatusWouldChange, Path: t.DstPath, Message: msg}
+		if ctx.diff {
+			ev.Diff = renderDiff(t.DstPath, exists, body, currentMode, mode)
+		}
+		return ev
 	}
 
 	if err := os.MkdirAll(filepath.Dir(t.DstPath), 0o755); err != nil {
@@ -187,6 +193,63 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 func sha256Hex(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
+}
+
+// renderDiff is the agent-side --diff helper. Produces a unified diff
+// of the new body vs. whatever's currently at dst. New files become
+// "all + lines"; binary files fall back to a mode-only summary.
+//
+// We shell out to /usr/bin/diff because every supported target has it
+// and avoiding a pure-Go LCS keeps the agent slim. Diff exits 1 when
+// files differ — that's expected, not an error.
+func renderDiff(dst string, exists bool, newBody []byte, currentMode, newMode os.FileMode) string {
+	if isBinary(newBody) {
+		// `diff -u` on binary files prints "Binary files differ" which is
+		// useless to the user. Short-circuit with a sha-equivalent note.
+		summary := fmt.Sprintf("binary file, %d bytes; sha changed", len(newBody))
+		if exists && currentMode != newMode {
+			summary += fmt.Sprintf("; mode %04o → %04o", currentMode, newMode)
+		}
+		return summary
+	}
+	oldPath := "/dev/null"
+	if exists {
+		oldPath = dst
+	}
+	tmp, err := os.CreateTemp("", "axup-diff-*")
+	if err != nil {
+		return "diff unavailable: " + err.Error()
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(newBody); err != nil {
+		_ = tmp.Close()
+		return "diff unavailable: " + err.Error()
+	}
+	_ = tmp.Close()
+	cmd := exec.Command("diff", "-u", "--label", dst+" (current)", "--label", dst+" (would write)", oldPath, tmp.Name())
+	out, err := cmd.Output()
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+		// 1 = files differ, expected
+		err = nil
+	}
+	if err != nil {
+		return "diff unavailable: " + err.Error()
+	}
+	body := strings.TrimRight(string(out), "\n")
+	if exists && currentMode != newMode {
+		body = fmt.Sprintf("mode %04o → %04o\n%s", currentMode, newMode, body)
+	}
+	return body
+}
+
+// isBinary heuristically detects binaries by looking for a NUL byte in
+// the first 8 KiB. Matches `grep -I` / `git` behavior.
+func isBinary(b []byte) bool {
+	n := len(b)
+	if n > 8192 {
+		n = 8192
+	}
+	return bytes.IndexByte(b[:n], 0) >= 0
 }
 
 func (f *FileState) appliedAtOrNow() string {

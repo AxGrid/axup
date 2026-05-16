@@ -29,7 +29,7 @@ func Run(in io.Reader, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
-	ctx := newRunCtx(state, plan.DryRun)
+	ctx := newRunCtx(state, plan.DryRun, plan.Diff)
 
 	// Status-only requests bypass task execution entirely. The agent reads
 	// state.json, walks every recorded file, and emits a synthetic task_end

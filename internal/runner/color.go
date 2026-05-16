@@ -40,3 +40,20 @@ func yellow(s string) string { return paint("33", s) }
 func cyan(s string) string   { return paint("36", s) }
 func gray(s string) string   { return paint("90", s) }
 func bold(s string) string   { return paint("1", s) }
+
+// paintDiffLine colors a single line of a unified diff: + green, - red,
+// @@ cyan, --- / +++ headers gray. Other lines pass through.
+func paintDiffLine(line string) string {
+	switch {
+	case len(line) >= 3 && (line[:3] == "+++" || line[:3] == "---"):
+		return gray(line)
+	case len(line) >= 2 && line[:2] == "@@":
+		return cyan(line)
+	case len(line) >= 1 && line[0] == '+':
+		return green(line)
+	case len(line) >= 1 && line[0] == '-':
+		return red(line)
+	default:
+		return line
+	}
+}

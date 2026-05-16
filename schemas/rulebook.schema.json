@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json",
+  "title": "axup rulebook",
+  "description": "Schema for github.com/AxGrid/axup rulebook.yaml — used by IDE YAML language servers for autocomplete and validation. Reference: doc/rulebook-reference.md.",
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$",
+      "description": "Rulebook identifier. Doubles as the remote state-dir name (~/.axup-state/<name>/state.json)."
+    },
+    "vars": {
+      "type": "object",
+      "description": "Default template variables. Per-host inventory vars, --vars file, and git auto-vars (git_sha, git_short_sha, git_branch, git_dirty) override these.",
+      "additionalProperties": true
+    },
+    "deps": {
+      "type": "array",
+      "description": "External rulebook dependencies fetched via git, locked in axup.lock.",
+      "items": { "$ref": "#/$defs/dep" }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "Declarative list of files managed by `axup secrets`.",
+      "properties": {
+        "recipients_file": {
+          "type": "string",
+          "description": "Path to age recipients file. Defaults: recipients.txt, then .axup/recipients.txt."
+        },
+        "files": {
+          "type": "array",
+          "description": "Files (relative to rulebook dir) age-encrypted via `axup secrets encrypt`. Each entry is either a bare path string or a {path, recipients} mapping for per-file recipient overrides.",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                  "path": { "type": "string" },
+                  "recipients": { "type": "string", "description": "Override SecretsSpec.recipients_file for this file only." }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "tasks": {
+      "type": "array",
+      "description": "Module-form rulebook only — a single reusable task list imported via `use:`. Cannot coexist with phase keys (bootstrap, deploy, …).",
+      "items": { "$ref": "#/$defs/task" }
+    },
+    "services": {
+      "type": "object",
+      "description": "Catalog of services consumed by `axup logs <name>`. Pure metadata — does NOT manage processes.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["logs"],
+        "properties": {
+          "logs": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ],
+            "description": "Log file path(s) on the remote. Templated against rb.Vars."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "patternProperties": {
+    "^(?!name$|vars$|deps$|secrets$|tasks$|services$)[a-z][a-z0-9_-]*$": {
+      "type": "array",
+      "description": "A phase — runnable via `axup run <name>`. Names `bootstrap` and `deploy` get the dedicated `axup bootstrap` / `axup deploy` subcommands.",
+      "items": { "$ref": "#/$defs/task" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "dep": {
+      "type": "object",
+      "required": ["name", "git", "version"],
+      "properties": {
+        "name": { "type": "string", "description": "Local handle for `use: <name>/...`." },
+        "git": { "type": "string", "description": "Repo URL: github.com/foo/bar, https://…, or git@…" },
+        "version": { "type": "string", "description": "Tag, branch, or commit SHA." }
+      },
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "object",
+      "description": "Exactly one of: command, copy, template, apt, service, docker_install, docker_compose, docker_build, docker_login, use.",
+      "properties": {
+        "name": { "type": "string", "description": "Human-readable label shown in CLI output." },
+        "when_changed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Run only if any of these remote paths changed earlier in this phase. Invalid on copy/template (they have built-in sha-diff)."
+        },
+        "command": { "type": "string", "description": "Shell command run via /bin/sh -c on the remote. Always reports status=changed unless when_changed gates it." },
+        "copy": { "$ref": "#/$defs/copy" },
+        "template": { "$ref": "#/$defs/template" },
+        "apt": { "$ref": "#/$defs/apt" },
+        "service": { "$ref": "#/$defs/service" },
+        "docker_install": { "$ref": "#/$defs/dockerInstall" },
+        "docker_compose": { "$ref": "#/$defs/dockerCompose" },
+        "docker_build": { "$ref": "#/$defs/dockerBuild" },
+        "docker_login": { "$ref": "#/$defs/dockerLogin" },
+        "use": { "type": "string", "description": "Inline an imported module: '<dep>/<module_path>'." },
+        "vars": {
+          "type": "object",
+          "description": "Vars passed to the imported module (only valid with `use:`).",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "copy": {
+      "type": "object",
+      "required": ["src", "dst"],
+      "properties": {
+        "src": { "type": "string", "description": "Local source path relative to rulebook dir." },
+        "dst": { "type": "string", "description": "Absolute remote destination." },
+        "mode": { "type": "string", "pattern": "^0?[0-7]{3,4}$", "description": "Octal mode, e.g. '0644'." }
+      },
+      "additionalProperties": false
+    },
+    "template": {
+      "type": "object",
+      "required": ["src", "dst"],
+      "properties": {
+        "src": { "type": "string", "description": "Local Go template source (text/template + sprig)." },
+        "dst": { "type": "string" },
+        "mode": { "type": "string", "pattern": "^0?[0-7]{3,4}$" }
+      },
+      "additionalProperties": false
+    },
+    "apt": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "array", "items": { "type": "string" } }
+          ],
+          "description": "Package name or list of packages."
+        },
+        "state": { "enum": ["present", "absent"], "default": "present" },
+        "update_cache": { "type": "boolean", "default": false }
+      },
+      "anyOf": [
+        { "required": ["name"] },
+        { "required": ["update_cache"] }
+      ],
+      "additionalProperties": false
+    },
+    "service": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "state": { "enum": ["started", "stopped", "restarted", "reloaded"] },
+        "enabled": { "type": "boolean", "description": "Only valid with provider: systemd." },
+        "provider": { "enum": ["systemd", "supervisor"], "default": "systemd" }
+      },
+      "additionalProperties": false
+    },
+    "dockerInstall": {
+      "type": "object",
+      "description": "Install Docker Engine via the get.docker.com convenience script. Skipped if `docker --version` already succeeds.",
+      "additionalProperties": false
+    },
+    "dockerCompose": {
+      "type": "object",
+      "required": ["dir"],
+      "properties": {
+        "dir": { "type": "string", "description": "Absolute remote dir containing docker-compose.yml." },
+        "state": { "enum": ["up", "down", "restarted", "pulled"], "default": "up" },
+        "pull": { "type": "boolean", "default": false, "description": "`docker compose pull` before the state action." },
+        "wait": { "type": "boolean", "default": false, "description": "Append --wait to `docker compose up` — block until healthchecks pass. state: up only." }
+      },
+      "additionalProperties": false
+    },
+    "dockerBuild": {
+      "type": "object",
+      "required": ["context"],
+      "properties": {
+        "context": { "type": "string" },
+        "dockerfile": { "type": "string", "default": "Dockerfile" },
+        "tag": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "push": { "type": "boolean", "default": false },
+        "platform": { "type": "string", "default": "linux/amd64" },
+        "build_args": { "type": "object", "additionalProperties": { "type": "string" } }
+      },
+      "oneOf": [
+        { "required": ["tag"], "not": { "required": ["tags"] } },
+        { "required": ["tags"], "not": { "required": ["tag"] } }
+      ],
+      "additionalProperties": false
+    },
+    "dockerLogin": {
+      "type": "object",
+      "required": ["registry"],
+      "properties": {
+        "registry": { "type": "string" },
+        "creds_file": { "type": "string", "description": "Path to a YAML file (possibly age-encrypted) with username/password." },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "password_file": { "type": "string" },
+        "password_env": { "type": "string" },
+        "location": { "enum": ["both", "local", "remote"], "default": "both" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

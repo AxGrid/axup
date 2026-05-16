@@ -22,7 +22,8 @@ var initCmd = &cobra.Command{
 	},
 }
 
-const rulebookTemplate = `name: my-app
+const rulebookTemplate = `# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: my-app
 
 vars:
   app_name: my-app

@@ -40,6 +40,7 @@ type Plan struct {
 	RulebookName string `json:"rulebook_name"`
 	Phase        string `json:"phase"`
 	DryRun       bool   `json:"dry_run,omitempty"`     // when true, handlers preview without applying
+	Diff         bool   `json:"diff,omitempty"`        // dry-run + diff: agent attaches a unified diff to would_change events for copy/template
 	StatusOnly   bool   `json:"status_only,omitempty"` // when true, agent reports state.json drift instead of running tasks
 	Tasks        []Task `json:"tasks"`
 }
@@ -105,4 +106,5 @@ type Event struct {
 	Stderr   string `json:"stderr,omitempty"`
 	ExitCode int    `json:"exit_code,omitempty"`
 	Path     string `json:"path,omitempty"` // for file-related events: which path was touched
+	Diff     string `json:"diff,omitempty"` // unified diff, attached by agent when Plan.Diff && status=would_change
 }

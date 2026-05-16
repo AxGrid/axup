@@ -41,6 +41,7 @@ These work on every subcommand:
 | `--ask-sudo-password` | Prompt for sudo password on a TTY. Implies `--sudo`. Mutex with `--sudo-password`. |
 | `--check` | Dry-run: handlers report `would_change` instead of applying. State is not rewritten. |
 | `--dry-run` | Alias for `--check`. |
+| `--diff` | In dry-run mode, attach a unified diff to every `copy:`/`template:` task that would overwrite a file. Implies `--check`. New files show as all-`+` lines; binary files fall back to a one-line "binary, sha changed" note; mode-only changes get a single-line note. Requires `/usr/bin/diff` on the remote (in every supported distro by default). |
 | `--no-color` | Disable ANSI colors. Auto-disabled when stdout is not a TTY. |
 | `--age-key PATH` | Path to age identity file. **Repeatable** for multiple keys. Overrides auto-discovery. |
 | `-h, --help` | Help for the command. |

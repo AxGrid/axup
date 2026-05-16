@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/sync/errgroup"
@@ -25,17 +26,19 @@ import (
 )
 
 type Options struct {
-	Phase        string // "bootstrap", "deploy", or any custom phase declared in the rulebook — ignored when StatusOnly is true
-	Host         string // user@addr literal, or inventory host name
-	Group        string // inventory group name (mutex with single-host modes)
-	RulebookPath string
-	VarsFile     string // optional: extra vars YAML; merged after rulebook defaults and git auto, before inventory host vars
-	KeyPath      string // optional: explicit SSH private key
-	Password     string // optional: explicit SSH password
-	Sudo         bool   // wrap agent in sudo -H -S
-	SudoPassword string // optional: sudo password (empty = expect NOPASSWD)
-	DryRun       bool   // --check / --dry-run: preview only, no changes applied
-	StatusOnly   bool   // `axup status` mode: skip local tasks, ask agent to report state drift
+	Phase         string // "bootstrap", "deploy", or any custom phase declared in the rulebook — ignored when StatusOnly is true
+	Host          string // user@addr literal, or inventory host name
+	Group         string // inventory group name (mutex with single-host modes)
+	RulebookPath  string
+	InventoryPath string // optional: explicit inventory file (overrides default inventory.yaml next to rulebook). May be age-encrypted.
+	VarsFile      string // optional: extra vars YAML; merged after rulebook defaults and git auto, before inventory host vars
+	KeyPath       string // optional: explicit SSH private key
+	Password      string // optional: explicit SSH password
+	Sudo          bool   // wrap agent in sudo -H -S
+	SudoPassword  string // optional: sudo password (empty = expect NOPASSWD)
+	DryRun        bool   // --check / --dry-run: preview only, no changes applied
+	Diff          bool   // --diff: in dry-run mode, agent attaches a unified diff to would_change events for copy/template
+	StatusOnly    bool   // `axup status` mode: skip local tasks, ask agent to report state drift
 }
 
 func Run(opts Options) error {
@@ -44,7 +47,7 @@ func Run(opts Options) error {
 	if err != nil {
 		return err
 	}
-	inv, err := inventory.LoadDir(probeRb.Dir)
+	inv, err := loadInventory(probeRb.Dir, opts.InventoryPath)
 	if err != nil {
 		return err
 	}
@@ -127,6 +130,7 @@ func Run(opts Options) error {
 				RulebookName: rbH.Name,
 				Phase:        opts.Phase,
 				DryRun:       opts.DryRun,
+				Diff:         opts.Diff,
 				Tasks:        remoteTasks,
 			}
 			failed, err := runOnHost(opts, host, plan)
@@ -148,6 +152,17 @@ func Run(opts Options) error {
 		return fmt.Errorf("one or more tasks failed")
 	}
 	return nil
+}
+
+// loadInventory picks the right inventory source: an explicit --inventory
+// PATH (which may be age-encrypted) if set, otherwise the default
+// inventory.yaml next to the rulebook (optional — nil is fine, fall back to
+// ad-hoc user@addr).
+func loadInventory(rulebookDir, explicit string) (*inventory.Inventory, error) {
+	if explicit != "" {
+		return inventory.LoadPath(explicit)
+	}
+	return inventory.LoadDir(rulebookDir)
 }
 
 // runStatus fans out a StatusOnly plan to every resolved host. No local tasks,
@@ -457,6 +472,12 @@ func printEvent(tag string, ev protocol.Event) {
 		}
 		if ev.Message != "" && ev.Status != protocol.StatusSkipped {
 			fmt.Printf("%s     %s %s\n", coloredTag, gray("msg:"), ev.Message)
+		}
+		if ev.Diff != "" {
+			fmt.Printf("%s     %s\n", coloredTag, gray("diff:"))
+			for _, line := range strings.Split(ev.Diff, "\n") {
+				fmt.Printf("%s       %s\n", coloredTag, paintDiffLine(line))
+			}
 		}
 	case protocol.EventLog:
 		fmt.Printf("%s   %s %s\n", coloredTag, gray("·"), ev.Message)

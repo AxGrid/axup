@@ -160,6 +160,12 @@ by a `done` event.
 `Plan` flags that change agent behavior:
 - `dry_run`: handlers do their idempotency check but skip the apply step and
   report `would_change` instead of `changed`. State is NOT written.
+- `diff` (only meaningful with `dry_run`): for `copy:` / `template:` tasks
+  that would overwrite a file, the agent shells out to `diff -u` and
+  attaches the unified diff in `Event.Diff`. Binary bodies (NUL byte in
+  first 8 KiB) fall back to a one-line "binary, sha changed" message;
+  mode-only changes get a single-line note. CLI surfaces it via `--diff`,
+  which implies `--check`. Printing is colored (`+`/`-`/`@@`).
 - `status_only`: agent skips tasks entirely, walks `state.json`, emits one
   synthetic `task_end` per tracked file with `in_sync` / `drift` / `missing`.
 
