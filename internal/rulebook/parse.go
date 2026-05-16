@@ -11,11 +11,62 @@ import (
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
-// LoadOptions is variadic — most callers pass none. HostVars is merged into
-// rb.Vars (overriding rulebook defaults) before deps/expand/render run, so the
-// resulting Rulebook is host-specific.
+// phaseNameRe is intentionally stricter than nameRe — phase names are
+// CLI arguments (`deploy run <phase>`) and YAML keys, so lower-snake
+// keeps them shell-friendly and consistent with bootstrap/deploy.
+var phaseNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
+
+// loadVarsFile reads a YAML file containing a top-level dict and returns
+// it as map[string]any. Relative paths resolve like every other CLI
+// flag — against CWD. If that doesn't exist, fall back to looking
+// alongside the rulebook so `--vars vars.yaml` works when the file
+// sits next to rulebook.yaml regardless of where the CLI is invoked.
+func loadVarsFile(path, rulebookDir string) (map[string]any, error) {
+	resolved := path
+	if !filepath.IsAbs(path) {
+		if _, err := os.Stat(path); err != nil {
+			alt := filepath.Join(rulebookDir, path)
+			if _, err2 := os.Stat(alt); err2 == nil {
+				resolved = alt
+			}
+		}
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("read --vars %s: %w", path, err)
+	}
+	out := map[string]any{}
+	if err := yaml.Unmarshal(data, &out); err != nil {
+		return nil, fmt.Errorf("parse --vars %s: %w", resolved, err)
+	}
+	return out, nil
+}
+
+func validatePhaseNames(phases map[string][]Task) error {
+	for name := range phases {
+		if !phaseNameRe.MatchString(name) {
+			return fmt.Errorf("phase %q is not a valid identifier (must match %s)", name, phaseNameRe)
+		}
+		if _, reserved := reservedPhaseNames[name]; reserved {
+			return fmt.Errorf("phase %q is reserved by the CLI; pick a different name", name)
+		}
+	}
+	return nil
+}
+
+// LoadOptions is variadic — most callers pass none. Var merge precedence
+// (highest wins):
+//
+//   HostVars (per-host inventory)
+//     > VarsFile (--vars external YAML)
+//       > git auto-vars (git_sha, git_short_sha, git_branch, git_dirty)
+//         > rulebook vars: defaults
+//
+// All four merges happen during Load so the resulting Rulebook is fully
+// host-specific by the time deps/expand/render run.
 type LoadOptions struct {
 	HostVars map[string]any
+	VarsFile string // optional: path to a YAML dict of extra vars
 }
 
 func Load(path string, opts ...LoadOptions) (*Rulebook, error) {
@@ -58,11 +109,37 @@ func loadInternal(path string, o LoadOptions) (*Rulebook, error) {
 			rb.Vars[k] = v
 		}
 	}
+
+	// --vars file — merged after rulebook defaults and git auto so it can
+	// override either, but before HostVars so per-host inventory still wins.
+	// File path is resolved relative to the rulebook's directory when
+	// non-absolute, so `--vars vars.yaml` next to the rulebook just works.
+	if o.VarsFile != "" {
+		extra, err := loadVarsFile(o.VarsFile, rb.Dir)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range extra {
+			rb.Vars[k] = v
+		}
+	}
 	// Apply per-host vars last so they override the rulebook's defaults and
 	// any auto-vars. This is what makes inventory-driven multi-host work:
 	// each host's Load() produces a Rulebook tailored to that host's view.
 	for k, v := range o.HostVars {
 		rb.Vars[k] = v
+	}
+
+	// Reject any phase name that would collide with the CLI's reserved
+	// dispatch words, and any name that's not a valid CLI argument.
+	if err := validatePhaseNames(rb.Phases); err != nil {
+		return nil, fmt.Errorf("rulebook %s: %w", path, err)
+	}
+
+	// Catch the legacy module-form mistake before downstream code does:
+	// a module rulebook uses `tasks:` and nothing else.
+	if len(rb.Tasks) > 0 && len(rb.Phases) > 0 {
+		return nil, fmt.Errorf("rulebook %s: cannot mix module-form `tasks:` with phase keys %v", path, rb.PhaseNames())
 	}
 
 	// Resolve deps and inline every `use:` task before we run downstream
@@ -74,21 +151,19 @@ func loadInternal(path string, o LoadOptions) (*Rulebook, error) {
 			return nil, err
 		}
 		visited := map[string]bool{}
-		rb.Bootstrap, err = expandUseTasks(rb.Bootstrap, depPaths, rb.Vars, visited)
-		if err != nil {
-			return nil, err
-		}
-		rb.Deploy, err = expandUseTasks(rb.Deploy, depPaths, rb.Vars, visited)
-		if err != nil {
-			return nil, err
+		for name, tasks := range rb.Phases {
+			expanded, err := expandUseTasks(tasks, depPaths, rb.Vars, visited)
+			if err != nil {
+				return nil, fmt.Errorf("phase %q: %w", name, err)
+			}
+			rb.Phases[name] = expanded
 		}
 	}
 
-	if err := validateTasks("bootstrap", rb.Bootstrap); err != nil {
-		return nil, err
-	}
-	if err := validateTasks("deploy", rb.Deploy); err != nil {
-		return nil, err
+	for _, name := range rb.PhaseNames() {
+		if err := validateTasks(name, rb.Phases[name]); err != nil {
+			return nil, err
+		}
 	}
 	if err := rb.expandStringFields(); err != nil {
 		return nil, err

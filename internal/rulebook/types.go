@@ -2,22 +2,67 @@ package rulebook
 
 import (
 	"fmt"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Rulebook struct {
-	Name      string         `yaml:"name"`
-	Vars      map[string]any `yaml:"vars,omitempty"`
-	Deps      []DepSpec      `yaml:"deps,omitempty"`      // top-level only
-	Bootstrap []Task         `yaml:"bootstrap,omitempty"` // top-level only
-	Deploy    []Task         `yaml:"deploy,omitempty"`    // top-level only
-	Tasks     []Task         `yaml:"tasks,omitempty"`     // module form: a single reusable list
-	Secrets   *SecretsSpec   `yaml:"secrets,omitempty"`   // declarative encrypted-files list
+	Name     string             `yaml:"name"`
+	Vars     map[string]any     `yaml:"vars,omitempty"`
+	Deps     []DepSpec          `yaml:"deps,omitempty"`     // top-level only
+	Tasks    []Task             `yaml:"tasks,omitempty"`    // module form: a single reusable list
+	Secrets  *SecretsSpec       `yaml:"secrets,omitempty"`  // declarative encrypted-files list
+	Services map[string]Service `yaml:"services,omitempty"` // catalog used by `deploy logs <name>`
+
+	// Phases captures every top-level key that isn't one of the reserved
+	// fields above — `bootstrap:`, `deploy:`, `deploy_crash:`, `migrate:`,
+	// any user-defined name (regex ^[a-z][a-z0-9_-]*$). The CLI dispatches
+	// via `deploy bootstrap`, `deploy deploy`, or `deploy run <phase>`.
+	Phases map[string][]Task `yaml:",inline"`
 
 	// Dir is the directory containing the rulebook.yaml, used to resolve
 	// relative src paths in copy/template tasks. Set by Load, not parsed.
 	Dir string `yaml:"-"`
+}
+
+// Service is a catalog entry consumed by `deploy logs <name>`. It does
+// NOT manage the running process — that's still `task.Service` (systemd
+// /supervisor). This is purely informational: "where are this service's
+// logs on the remote".
+type Service struct {
+	Logs StringOrList `yaml:"logs"` // one path or a list; templated through rb.Vars
+}
+
+// reservedPhaseNames are CLI-internal phase strings the runner uses for
+// special-case dispatch — users can't define a rulebook phase with these
+// names because it'd collide with the dispatch logic.
+var reservedPhaseNames = map[string]struct{}{
+	"status":   {}, // `deploy status` walks state.json, not a real phase
+	"tasks":    {}, // module-form key; lives in its own struct field
+	"services": {}, // catalog block; lives in its own struct field
+	"logs":     {}, // `deploy logs` subcommand
+}
+
+// Phase returns the task list for `name`, or nil if no such phase exists.
+// Always prefer this helper over reading r.Phases directly so a future move
+// of a phase to its own struct field stays a one-line change.
+func (r *Rulebook) Phase(name string) []Task {
+	if r.Phases == nil {
+		return nil
+	}
+	return r.Phases[name]
+}
+
+// PhaseNames returns the declared phase names, sorted, so error messages
+// and `deploy status` / scaffold output are stable.
+func (r *Rulebook) PhaseNames() []string {
+	out := make([]string, 0, len(r.Phases))
+	for k := range r.Phases {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SecretsSpec declares which files in the project are managed by `deploy
@@ -95,6 +140,7 @@ type DockerComposeSpec struct {
 	Dir   string `yaml:"dir"`
 	State string `yaml:"state,omitempty"` // up (default), down, restarted, pulled
 	Pull  bool   `yaml:"pull,omitempty"`  // docker compose pull before up
+	Wait  bool   `yaml:"wait,omitempty"`  // append --wait to `docker compose up` (blocks until healthchecks pass)
 }
 
 // DockerInstallSpec triggers the official get.docker.com installer. Skipped if

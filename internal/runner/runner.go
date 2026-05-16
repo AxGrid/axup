@@ -25,10 +25,11 @@ import (
 )
 
 type Options struct {
-	Phase        string // "bootstrap" or "deploy" — ignored when StatusOnly is true
+	Phase        string // "bootstrap", "deploy", or any custom phase declared in the rulebook — ignored when StatusOnly is true
 	Host         string // user@addr literal, or inventory host name
 	Group        string // inventory group name (mutex with single-host modes)
 	RulebookPath string
+	VarsFile     string // optional: extra vars YAML; merged after rulebook defaults and git auto, before inventory host vars
 	KeyPath      string // optional: explicit SSH private key
 	Password     string // optional: explicit SSH password
 	Sudo         bool   // wrap agent in sudo -H -S
@@ -39,7 +40,7 @@ type Options struct {
 
 func Run(opts Options) error {
 	recomputeColor()
-	probeRb, err := rulebook.Load(opts.RulebookPath)
+	probeRb, err := rulebook.Load(opts.RulebookPath, rulebook.LoadOptions{VarsFile: opts.VarsFile})
 	if err != nil {
 		return err
 	}
@@ -56,17 +57,18 @@ func Run(opts Options) error {
 		return runStatus(opts, hosts, probeRb.Name)
 	}
 
-	switch opts.Phase {
-	case "bootstrap", "deploy":
-	default:
-		return fmt.Errorf("unknown phase %q", opts.Phase)
+	if opts.Phase == "" {
+		return fmt.Errorf("phase is required (e.g. bootstrap, deploy, or any custom phase declared in the rulebook)")
+	}
+	if probeRb.Phase(opts.Phase) == nil {
+		return fmt.Errorf("rulebook %q has no phase %q (declared: %v)", probeRb.Name, opts.Phase, probeRb.PhaseNames())
 	}
 
 	// Local tasks (docker_build, docker_login(local)) run once for the whole
 	// invocation regardless of host count. We use the FIRST host's vars to
 	// build them — typical usage has these be host-invariant. If you need
 	// per-host builds you'd run deploy separately per host.
-	rb0, err := rulebook.Load(opts.RulebookPath, rulebook.LoadOptions{HostVars: hosts[0].Vars})
+	rb0, err := rulebook.Load(opts.RulebookPath, rulebook.LoadOptions{HostVars: hosts[0].Vars, VarsFile: opts.VarsFile})
 	if err != nil {
 		return err
 	}
@@ -108,7 +110,7 @@ func Run(opts Options) error {
 			rbH := rb0
 			if i != 0 {
 				var err error
-				rbH, err = rulebook.Load(opts.RulebookPath, rulebook.LoadOptions{HostVars: host.Vars})
+				rbH, err = rulebook.Load(opts.RulebookPath, rulebook.LoadOptions{HostVars: host.Vars, VarsFile: opts.VarsFile})
 				if err != nil {
 					return fmt.Errorf("[%s] load: %w", host.Name, err)
 				}
@@ -191,13 +193,7 @@ func runStatus(opts Options, hosts []inventory.Resolved, rulebookName string) er
 }
 
 func pickPhaseTasks(rb *rulebook.Rulebook, phase string) []rulebook.Task {
-	switch phase {
-	case "bootstrap":
-		return rb.Bootstrap
-	case "deploy":
-		return rb.Deploy
-	}
-	return nil
+	return rb.Phase(phase)
 }
 
 // runOnHost opens SSH, uploads the agent, sends the Plan, streams events.
@@ -361,6 +357,7 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 				ComposeDir:   t.DockerCompose.Dir,
 				ComposeState: state,
 				ComposePull:  t.DockerCompose.Pull,
+				ComposeWait:  t.DockerCompose.Wait,
 			})
 
 		case "docker_install":

@@ -41,5 +41,5 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Alias for --check")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors (auto-disabled when stdout is not a TTY)")
 	rootCmd.PersistentFlags().StringSliceVar(&ageKeyPaths, "age-key", nil, "Path to age identity file (repeatable; overrides auto-discovery; $DEPLOY_AGE_KEY is a path-list alternative)")
-	rootCmd.AddCommand(versionCmd, initCmd, bootstrapCmd, deployCmd, depsCmd, secretsCmd, statusCmd)
+	rootCmd.AddCommand(versionCmd, initCmd, bootstrapCmd, deployCmd, runCmd, logsCmd, depsCmd, secretsCmd, statusCmd)
 }

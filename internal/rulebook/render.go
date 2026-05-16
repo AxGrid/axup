@@ -32,20 +32,30 @@ func renderString(s string, vars map[string]any) (string, error) {
 	return buf.String(), nil
 }
 
-// expandStringFields walks Bootstrap and Deploy tasks and replaces template
+// expandStringFields walks every phase's tasks and replaces template
 // expressions in command strings, file paths, and when_changed entries. File
 // bodies (copy src, template src) are handled by RenderTemplate / ReadFile at
 // task-build time.
 func (rb *Rulebook) expandStringFields() error {
-	for i := range rb.Bootstrap {
-		if err := expandTaskStrings(&rb.Bootstrap[i], rb.Vars); err != nil {
-			return fmt.Errorf("bootstrap[%d]: %w", i, err)
+	for _, name := range rb.PhaseNames() {
+		tasks := rb.Phases[name]
+		for i := range tasks {
+			if err := expandTaskStrings(&tasks[i], rb.Vars); err != nil {
+				return fmt.Errorf("%s[%d]: %w", name, i, err)
+			}
 		}
 	}
-	for i := range rb.Deploy {
-		if err := expandTaskStrings(&rb.Deploy[i], rb.Vars); err != nil {
-			return fmt.Errorf("deploy[%d]: %w", i, err)
+	// services: catalog — log paths are templated too so they can reuse
+	// rulebook vars (log_dir, …) and inventory host vars.
+	for name, svc := range rb.Services {
+		for i, p := range svc.Logs {
+			r, err := renderString(p, rb.Vars)
+			if err != nil {
+				return fmt.Errorf("services[%s].logs[%d]: %w", name, i, err)
+			}
+			svc.Logs[i] = r
 		}
+		rb.Services[name] = svc
 	}
 	return nil
 }

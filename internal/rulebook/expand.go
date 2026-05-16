@@ -175,8 +175,8 @@ func loadModule(path string) (*Rulebook, error) {
 	if len(rb.Tasks) == 0 {
 		return nil, fmt.Errorf("module %s: missing 'tasks:' (module rulebooks must use the single-list form)", path)
 	}
-	if len(rb.Bootstrap) > 0 || len(rb.Deploy) > 0 {
-		return nil, fmt.Errorf("module %s: must use 'tasks:' (not 'bootstrap:' / 'deploy:')", path)
+	if len(rb.Phases) > 0 {
+		return nil, fmt.Errorf("module %s: must use 'tasks:' (not phase keys like %v)", path, rb.PhaseNames())
 	}
 	if len(rb.Deps) > 0 {
 		return nil, fmt.Errorf("module %s: transitive deps are not supported in MVP", path)

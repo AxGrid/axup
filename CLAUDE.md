@@ -83,6 +83,71 @@ internal/
     └── bin/                   populated by `make agent` (gitignored)
 ```
 
+## Rulebook phases
+
+A rulebook top-level YAML maps to `rulebook.Rulebook`. The reserved keys
+are `name`, `vars`, `deps`, `secrets`, and `tasks` (module-form only).
+**Every other top-level key is a phase** and gets captured into
+`Rulebook.Phases map[string][]Task` via `yaml:",inline"`. So:
+
+```yaml
+name: cubeweb
+vars:    { ... }
+bootstrap:    [...]      # → rb.Phases["bootstrap"]
+deploy:       [...]      # → rb.Phases["deploy"]
+deploy_crash: [...]      # → rb.Phases["deploy_crash"]
+migrate:      [...]      # → rb.Phases["migrate"]
+```
+
+Phase names must match `^[a-z][a-z0-9_-]*$` and cannot be `status` or
+`tasks` (both CLI-reserved). The CLI dispatches with:
+
+- `deploy bootstrap` — runs `bootstrap:` (backward-compat alias)
+- `deploy deploy` — runs `deploy:` (backward-compat alias)
+- `deploy run <phase>` — runs any phase (incl. bootstrap/deploy)
+
+All three flow through the same `runner.Run`. State on the remote lives
+at `~/.deploy-state/<rulebook_name>/state.json` — every phase of the
+same rulebook shares one state file: a `copy:` dst written by
+`bootstrap` is "in sync" when a later `deploy_crash` runs and references
+the same path. If you want isolated state, give each rulebook a
+different `name:` (split into multiple rulebook files).
+
+The `--vars <file>` flag merges an external YAML dict into rb.Vars.
+Precedence (highest wins):
+
+```
+inventory host vars > --vars file > git auto-vars > rulebook vars defaults
+```
+
+Relative `--vars` paths resolve against CWD first, then against the
+rulebook's directory (so `--vars vars.yaml` works regardless of where
+the CLI was invoked from, as long as the file sits next to the rulebook).
+
+## Services catalog + `deploy logs`
+
+The optional top-level `services:` block declares a name → log paths
+map that `deploy logs <name> [<name>...]` uses to tail files over SSH:
+
+```yaml
+services:
+  kv:         { logs: /var/log/supervisor-kv.log }
+  crash:      { logs: [/var/log/supervisor-crash.log, /var/log/cubeweb/crash-extra.log] }
+  supervisor: { logs: /var/log/supervisor/supervisord.log }
+```
+
+Paths are templated through `rb.Vars` (so `{{ .log_dir }}/kv.log`
+works) and `Logs` accepts either a string or a list via `StringOrList`.
+The catalog is purely informational — it does NOT manage processes
+(that's the `service:` task primitive, separate concept). Field lives
+under `rb.Services map[string]Service` and is reserved (won't fall
+into `Phases` even though it's a top-level key).
+
+`deploy logs` opens one SSH session per resolved host, runs
+`tail -n N -q [-F] /path1 /path2 …`, and forwards stdout line-by-line
+with `[host]` prefix. Defaults: `-n 20 -F`. Cancellation closes the
+session — local Ctrl-C kills the remote `tail`.
+
 ## Wire protocol
 
 CLI → agent: one `protocol.Plan` JSON object on stdin (the SSH session's
@@ -242,7 +307,10 @@ ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.deploy-state/<name>'
 
 - **`docker_compose up` always reports `changed`.** Parsing `docker compose ps`
   reliably across versions is brittle. Don't add a "check if up" heuristic
-  without a strong reason.
+  without a strong reason. If a task downstream needs the container to be
+  *ready* (not just running), set `wait: true` on the `docker_compose` task —
+  the agent appends `--wait` to `docker compose up`, blocking until every
+  service's healthcheck reports `healthy`. Works only for `state: up`.
 
 - **`when_changed` on copy/template is rejected.** Those primitives already
   have sha-based skip logic. The parser errors out with a clear message.

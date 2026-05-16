@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -190,6 +191,40 @@ func streamLines(r io.Reader, onLine func([]byte)) error {
 		if err != nil {
 			return err
 		}
+	}
+}
+
+// Stream runs cmd on the remote and forwards its stdout/stderr to the
+// provided writers as bytes arrive. Returns when the remote process
+// exits OR when ctx is cancelled (whichever comes first). On
+// cancellation the SSH session is closed, which kills the remote
+// process. Used by `deploy logs` for tail -F streaming.
+func (c *Client) Stream(ctx context.Context, cmd string, stdout, stderr io.Writer) error {
+	sess, err := c.c.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+	if stdout != nil {
+		sess.Stdout = stdout
+	}
+	if stderr != nil {
+		sess.Stderr = stderr
+	}
+	if err := sess.Start(cmd); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- sess.Wait() }()
+	select {
+	case <-ctx.Done():
+		// Closing the session sends SIGHUP to the remote process group;
+		// `tail` exits cleanly. We swallow Wait's error after cancel.
+		_ = sess.Close()
+		<-done
+		return ctx.Err()
+	case err := <-done:
+		return err
 	}
 }
 

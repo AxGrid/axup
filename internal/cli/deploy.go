@@ -10,6 +10,7 @@ var (
 	deployHost     string
 	deployGroup    string
 	deployRulebook string
+	deployVarsFile string
 )
 
 var deployCmd = &cobra.Command{
@@ -25,6 +26,7 @@ var deployCmd = &cobra.Command{
 			Host:         deployHost,
 			Group:        deployGroup,
 			RulebookPath: deployRulebook,
+			VarsFile:     deployVarsFile,
 			KeyPath:      a.KeyPath,
 			Password:     a.Password,
 			Sudo:         a.Sudo,
@@ -38,4 +40,5 @@ func init() {
 	deployCmd.Flags().StringVar(&deployHost, "host", "", "Target host (user@addr[:port]) or inventory host name")
 	deployCmd.Flags().StringVar(&deployGroup, "group", "", "Inventory group name (mutex with --host)")
 	deployCmd.Flags().StringVar(&deployRulebook, "rulebook", "rulebook.yaml", "Path to rulebook.yaml")
+	deployCmd.Flags().StringVar(&deployVarsFile, "vars", "", "Optional YAML file with vars to merge into the rulebook (overrides rulebook defaults, inventory wins)")
 }

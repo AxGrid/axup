@@ -30,10 +30,95 @@ bootstrap:                            # tasks run by `deploy bootstrap`
 deploy:                               # tasks run by `deploy deploy`
   - { docker_compose: { dir: /opt/my-app, state: up } }
   - …
+
+# Any other top-level key is a custom phase. Run it with
+# `deploy run <phase>`.
+deploy_crash:
+  - { copy: { src: bin/crash, dst: /opt/crash } }
+  - { service: { name: crash, state: restarted, provider: supervisor } }
+
+migrate:
+  - { command: "/opt/my-app/bin/migrate up" }
 ```
 
 The `name` field doubles as the remote state directory: `~/.deploy-state/<name>/state.json`.
 It must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`.
+
+## Phases
+
+Reserved top-level keys: `name`, `vars`, `deps`, `secrets`, `tasks`
+(module-form only). Everything else is a phase. Phase names must match
+`^[a-z][a-z0-9_-]*$` and cannot be `status` or `tasks` (CLI-reserved).
+
+Run any phase via:
+
+```
+deploy bootstrap                # alias for: deploy run bootstrap
+deploy deploy                   # alias for: deploy run deploy
+deploy run deploy_crash         # any custom phase
+deploy run migrate --check      # dry-run is supported on every phase
+deploy run deploy --group prod  # all the existing flags apply
+```
+
+All phases of the same rulebook share one state file
+(`~/.deploy-state/<name>/state.json`) on the remote — so a `copy:` dst
+written during `bootstrap` is "already in sync" when a later
+`deploy_crash` references the same path. If you want isolated state,
+split into multiple rulebook files with different `name:` values.
+
+## External vars (`--vars`)
+
+`--vars <path>` loads a YAML dict and merges it into `vars:` after the
+rulebook's own defaults and git auto-vars, but before per-host
+inventory vars. Useful when you want to keep secrets / per-env knobs
+out of the rulebook itself:
+
+```yaml
+# vars.prod.yaml
+admin_password: "{{ env.ADMIN_PASSWORD }}"
+mysql_password: "{{ env.MYSQL_PASSWORD }}"
+```
+
+```
+deploy deploy --vars vars.prod.yaml --group prod
+```
+
+Precedence (highest wins):
+
+```
+inventory host vars  >  --vars file  >  git auto-vars  >  rulebook vars
+```
+
+Relative `--vars` paths resolve against CWD first, then against the
+rulebook's directory.
+
+## Services catalog (`services:`)
+
+The optional top-level `services:` block declares a name → log files
+map consumed by [`deploy logs`](cli-reference.md). It does NOT manage
+processes — that's still the `service:` task primitive. Think of it as
+"the catalog of things you might want to tail".
+
+```yaml
+services:
+  kv:           { logs: /var/log/supervisor-kv.log }
+  billing:      { logs: /var/log/supervisor-billing.log }
+  rng:          { logs: [/var/log/supervisor-rng.log, /var/log/rng-extra.log] }
+  supervisor:   { logs: /var/log/supervisor/supervisord.log }
+```
+
+- `logs:` accepts a string or a list (same `StringOrList` convention
+  as `apt: name:`).
+- Paths are templated against `vars:` — so `{{ .log_dir }}/kv.log` works
+  and resolves per host.
+- Service names match `^[a-z][a-z0-9_-]*$`. `services` is reserved and
+  cannot be used as a phase name.
+
+`deploy logs <name>... --host X` (or `--group X`) opens an SSH session
+per resolved host, runs `tail -n 20 -q -F <paths…>` against the
+resolved files, and streams output prefixed with `[host]`. See
+[cli-reference.md](cli-reference.md) for flags (`-n` / `--tail`,
+`--no-follow`, `--list`).
 
 ## Variables and templating
 
@@ -210,11 +295,20 @@ Run `docker compose` in a directory containing a `docker-compose.yml`.
     dir: /opt/mysql
     state: up                # up | down | restarted | pulled
     pull: true               # docker compose pull before the state action
+    wait: true               # only on state: up — append --wait
 ```
 
 `state: up` runs `docker compose up -d --remove-orphans`. The compose CLI is
 idempotent on the docker side; we always report `changed` because parsing
 `compose ps` reliably across versions adds complexity we don't need yet.
+
+`wait: true` appends `--wait` to the `up` invocation: the task blocks until
+every service with a healthcheck reports `healthy` (or its `start_period`
++ retries expire and compose fails). Use it when a follow-up task needs to
+talk to the container — e.g., MySQL: its entrypoint runs `init.sql` during
+a temp-server phase and only flips healthy AFTER the real `mysqld` accepts
+connections, so `wait: true` is exactly the readiness gate you want. Has
+no effect on `down` / `restarted` / `pulled`.
 
 ### `docker_build` (CLI-local)
 

@@ -10,6 +10,7 @@ var (
 	bootstrapHost     string
 	bootstrapGroup    string
 	bootstrapRulebook string
+	bootstrapVarsFile string
 )
 
 var bootstrapCmd = &cobra.Command{
@@ -25,6 +26,7 @@ var bootstrapCmd = &cobra.Command{
 			Host:         bootstrapHost,
 			Group:        bootstrapGroup,
 			RulebookPath: bootstrapRulebook,
+			VarsFile:     bootstrapVarsFile,
 			KeyPath:      a.KeyPath,
 			Password:     a.Password,
 			Sudo:         a.Sudo,
@@ -38,4 +40,5 @@ func init() {
 	bootstrapCmd.Flags().StringVar(&bootstrapHost, "host", "", "Target host (user@addr[:port]) or inventory host name")
 	bootstrapCmd.Flags().StringVar(&bootstrapGroup, "group", "", "Inventory group name (mutex with --host)")
 	bootstrapCmd.Flags().StringVar(&bootstrapRulebook, "rulebook", "rulebook.yaml", "Path to rulebook.yaml")
+	bootstrapCmd.Flags().StringVar(&bootstrapVarsFile, "vars", "", "Optional YAML file with vars to merge into the rulebook (overrides rulebook defaults, inventory wins)")
 }

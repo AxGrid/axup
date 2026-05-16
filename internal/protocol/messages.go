@@ -76,6 +76,7 @@ type Task struct {
 	ComposeDir   string `json:"compose_dir,omitempty"`
 	ComposeState string `json:"compose_state,omitempty"` // up|down|restarted|pulled
 	ComposePull  bool   `json:"compose_pull,omitempty"`  // pull before up
+	ComposeWait  bool   `json:"compose_wait,omitempty"`  // pass --wait to `docker compose up` (block until healthchecks pass)
 
 	// docker_build (CLI-local):
 	BuildContext    string            `json:"build_context,omitempty"`

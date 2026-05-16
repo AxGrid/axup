@@ -14,6 +14,8 @@ Top-level commands:
 |---|---|
 | `deploy bootstrap` | Run the rulebook's `bootstrap:` tasks on one or more hosts |
 | `deploy deploy` | Run the rulebook's `deploy:` tasks on one or more hosts |
+| `deploy run <phase>` | Run any named phase (incl. custom phases like `deploy_crash`, `migrate`) |
+| `deploy logs <svc>...` | Tail logs of one or more services declared in `services:` |
 | `deploy status` | Report each host's recorded state and any drift, read-only |
 | `deploy init` | Scaffold a stub `rulebook.yaml` in the current directory |
 | `deploy deps tidy` | Resolve `deps:` to fresh SHAs and rewrite `deploy.lock` |
@@ -88,6 +90,7 @@ Local flags (same for both):
 | `--host STR` | — | Target host: `user@addr[:port]` literal OR an inventory host name. |
 | `--group STR` | — | Inventory group name. Mutex with `--host`. |
 | `--rulebook PATH` | `rulebook.yaml` | Path to the rulebook YAML. |
+| `--vars PATH` | — | Optional YAML file with extra vars (merged after rulebook defaults and git auto-vars; per-host inventory still wins). Relative paths resolve against CWD, falling back to the rulebook's directory. |
 
 Exactly one of `--host` or `--group` is required. See
 [inventory-multi-host.md](inventory-multi-host.md) for how each resolves.
@@ -113,6 +116,82 @@ deploy deploy --key ~/.ssh/deploy_rsa --ask-sudo-password --host deploybot@serve
 # Different rulebook
 deploy deploy --rulebook ./prod/rulebook.yaml --host prod-1
 ```
+
+## `deploy run`
+
+```
+deploy run <phase> [flags]
+```
+
+Runs any phase from the rulebook against the chosen host(s). A rulebook
+can declare arbitrary top-level keys alongside `bootstrap:` / `deploy:`
+— each is a phase, runnable with `deploy run`:
+
+```yaml
+# rulebook.yaml
+bootstrap:    [...]
+deploy:       [...]
+deploy_crash: [...]
+migrate:      [...]
+```
+
+```sh
+deploy run deploy_crash --group stage         # only push the game modules
+deploy run migrate --host prod-1              # run migrations on one host
+deploy run deploy --check --group prod        # equivalent to `deploy deploy --check`
+```
+
+Phase names must match `^[a-z][a-z0-9_-]*$` and cannot be `status` /
+`tasks` / `services` / `logs` (CLI-reserved). All phases of one
+rulebook share `~/.deploy-state/<name>/state.json` on the remote — a
+file written by `bootstrap` is "in sync" when a later `deploy_crash`
+references the same path.
+
+Local flags: same as `deploy bootstrap` / `deploy deploy`
+(`--host`, `--group`, `--rulebook`, `--vars`).
+
+## `deploy logs`
+
+```
+deploy logs <service> [<service>...] [flags]
+deploy logs --list [flags]
+```
+
+Tails files declared in the rulebook's `services:` block over SSH, in
+parallel across multiple hosts. Each line is prefixed with `[host]` so
+fan-out output stays attributable.
+
+Local flags:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--host STR` | — | Single host (inventory alias or `user@addr[:port]`). |
+| `--group STR` | — | Inventory group — every host in parallel. Mutex with `--host`. |
+| `--rulebook PATH` | `rulebook.yaml` | Path to the rulebook YAML. |
+| `--vars PATH` | — | Optional vars file (log paths get templated through it). |
+| `-n, --tail N` | `20` | Initial lines per file before streaming starts. |
+| `--no-follow` | `false` | Snapshot mode — print and exit; no `tail -F`. |
+| `--list` | `false` | Print declared services + paths and exit. No SSH. |
+
+`deploy logs` invokes `tail -n N -q [-F] <path1> <path2> …` in one SSH
+session per host. `-q` suppresses the per-file `==> path <==` header
+that tail emits when multiple paths are tailed together — service
+attribution comes from the log content itself (slog's `service=` field
+in JSON output, etc).
+
+```sh
+# Snapshot of the last 200 lines of crash, no streaming
+deploy logs crash --host stage-1 -n 200 --no-follow
+
+# Stream billing + supervisord master log on every prod host
+deploy logs billing supervisor --group prod
+
+# Discover what's declared
+deploy logs --list
+```
+
+Ctrl-C closes every SSH session and the corresponding remote `tail`
+exits cleanly.
 
 ## `deploy status`
 

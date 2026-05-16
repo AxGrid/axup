@@ -22,6 +22,13 @@ func runDockerComposeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	switch state {
 	case "up":
 		action = []string{"up", "-d", "--remove-orphans"}
+		if t.ComposeWait {
+			// Block until every service with a healthcheck reports
+			// healthy (or the start_period + retries expire). Lets a
+			// follow-up task assume the container is actually ready,
+			// not just "running". Only valid on up.
+			action = append(action, "--wait")
+		}
 	case "down":
 		action = []string{"down"}
 	case "restarted":
@@ -34,8 +41,11 @@ func runDockerComposeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 
 	if ctx.dryRun {
 		preview := "would run: docker compose " + action[0]
+		if t.ComposeWait && state == "up" {
+			preview += " --wait"
+		}
 		if t.ComposePull && (state == "up" || state == "restarted") {
-			preview = "would run: docker compose pull && docker compose " + action[0]
+			preview = "would run: docker compose pull && " + preview[len("would run: "):]
 		}
 		return protocol.Event{Status: protocol.StatusWouldChange, Path: t.ComposeDir, Message: preview}
 	}
