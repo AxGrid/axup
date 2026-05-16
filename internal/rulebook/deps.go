@@ -20,7 +20,7 @@ func CacheDir() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "deploy"), nil
+	return filepath.Join(root, "axup"), nil
 }
 
 // NormalizedURL turns "github.com/foo/bar" into "https://github.com/foo/bar.git",

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/logo.svg" width="160" alt="deploy"/>
+  <img src="assets/logo.svg" width="160" alt="axup"/>
 </p>
 
-<h1 align="center">deploy</h1>
+<h1 align="center">axup</h1>
 
 <p align="center">
   Ansible-style server provisioning and project rollout, in a single Go binary.<br/>
@@ -15,7 +15,7 @@
 
 `axup` reads a YAML rulebook, opens an SSH connection to your server(s), uploads a small embedded agent into `/tmp`, and streams a plan of tasks to it: install packages, render templates, write configs, manage services, bring up Docker Compose stacks, build and push images, and so on. State (sha256 hashes of every managed file) lives on the remote, so re-runs only touch what actually changed.
 
-Compared to Ansible: no Python on either side, no roles/handlers ceremony, two verbs (`bootstrap` and `deploy`), and everything that isn't a task is just one of nine well-defined task types.
+Compared to Ansible: no Python on either side, no roles/handlers ceremony, two built-in verbs (`bootstrap` and `deploy`) plus `run <phase>` for any custom phase you declare, and everything that isn't a task is just one of nine well-defined task types.
 
 ## Quick start
 
@@ -36,7 +36,10 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 
 ## Highlights
 
-- **Nine task primitives**: `command`, `copy`, `template`, `apt`, `service` (systemd + supervisor), `docker_install`, `docker_build`, `docker_compose`, `docker_login`
+- **Nine task primitives**: `command`, `copy`, `template`, `apt`, `service` (systemd + supervisor), `docker_install`, `docker_build`, `docker_compose` (with `wait: true` for healthcheck-gated readiness), `docker_login`
+- **Arbitrary phases**: any top-level key in the rulebook besides the reserved ones becomes a phase — run `bootstrap:` / `deploy:` / `deploy_crash:` / `migrate:` / … via `axup run <phase>`
+- **`axup logs <svc>...`**: tail per-service logs over SSH with `[host]` prefix, parallel across `--group`. Catalogs live under a `services:` block in the rulebook.
+- **External vars file**: `--vars file.yaml` merges a per-env dict into rulebook vars (precedence: inventory > --vars > git auto > rulebook defaults).
 - **Remote state with sha256 diffs**: re-applying a rulebook only touches files whose content or mode actually changed; out-of-band drift is detected
 - **`axup status`**: read-only mode that reports `in_sync` / `drift` / `missing` for every tracked file on every host
 - **`axup bootstrap --check`** (dry-run): see what would change without applying anything
@@ -45,6 +48,7 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 - **age-encrypted secrets**: public keys committed to the repo via `recipients.txt`, transparent decrypt at deploy time, multiple identities supported (per-developer keys, SSH keys, `~/.config/age/keys.txt`)
 - **Auth modes**: SSH key (auto-discover or `--key`), SSH password (`--password` / `--ask-password`), sudo with or without password (`--sudo` / `--sudo-password` / `--ask-sudo-password`)
 - **Docker pipeline**: build images locally with `docker buildx`, push to your registry with `docker_login` creds, pull on the remote via `docker_compose pull` — all chained from one rulebook
+- **`make install`**: drops `axup` into `$(PREFIX)/bin` (default `/usr/local`, override `PREFIX=$HOME/.local` to avoid sudo)
 - **Colored output** with per-host summaries and a content-detecting plain/encrypted file path — `NO_COLOR` and `--no-color` honored
 - **Git auto-vars**: `git_sha`, `git_short_sha`, `git_branch`, `git_dirty` are injected into the template context automatically — handy for `tag: "myapi:{{ .git_short_sha }}"`
 

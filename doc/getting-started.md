@@ -190,7 +190,7 @@ Try drifting it: edit the file out-of-band on the server, then re-run
 
 ## 7. Preview changes without applying them
 
-Add `--check` (alias `--dry-run`) to any `bootstrap` or `deploy` invocation:
+Add `--check` (alias `--dry-run`) to any `bootstrap` / `deploy` / `run` invocation:
 
 ```
 axup deploy --check --host root@your-server.example.com

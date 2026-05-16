@@ -92,11 +92,11 @@ the cached clone.
 
 ## Cache layout
 
-Cloned repos live in `$XDG_CACHE_HOME/deploy/git/` (`~/Library/Caches/deploy`
-on macOS, `~/.cache/deploy` on Linux), keyed by host, sanitized path, and SHA:
+Cloned repos live in `$XDG_CACHE_HOME/axup/git/` (`~/Library/Caches/axup`
+on macOS, `~/.cache/axup` on Linux), keyed by host, sanitized path, and SHA:
 
 ```
-~/.cache/deploy/git/github.com/me/deploy-rules@9a3b4c…e7d.<urlhash>/
+~/.cache/axup/git/github.com/me/deploy-rules@9a3b4c…e7d.<urlhash>/
 ```
 
 Different SHAs of the same repo coexist as sibling directories, so multiple

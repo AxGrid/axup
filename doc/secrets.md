@@ -43,7 +43,8 @@ private key is enough to decrypt.
 
 Override the filename via `secrets.recipients_file:` in the rulebook (see
 below). The default search path is `recipients.txt`, then
-`.deploy/recipients.txt`.
+`.axup/recipients.txt` (with `.deploy/recipients.txt` kept as a backwards-
+compat fallback).
 
 ### 2. `secrets:` block in `rulebook.yaml` — which files are encrypted
 
