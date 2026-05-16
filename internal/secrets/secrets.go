@@ -16,7 +16,6 @@ package secrets
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -330,6 +329,17 @@ func LoadRecipients(path string) ([]age.Recipient, error) {
 	return recs, nil
 }
 
+// snippet truncates a recipient-line preview to keep the error one line.
+// Recipients are normally 60–600 chars; 32 is enough to spot a typo
+// (stray `4#`, `// comment`, blank-but-not-empty whitespace, …).
+func snippet(s string) string {
+	const max = 32
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
 func parseRecipientLine(line string) (age.Recipient, error) {
 	switch {
 	case strings.HasPrefix(line, "age1"):
@@ -337,6 +347,6 @@ func parseRecipientLine(line string) (age.Recipient, error) {
 	case strings.HasPrefix(line, "ssh-"):
 		return agessh.ParseRecipient(line)
 	default:
-		return nil, errors.New("unrecognized recipient format (expected age1… or ssh-…)")
+		return nil, fmt.Errorf("unrecognized recipient format (expected age1… or ssh-…, got %q) — if this is a comment, prefix with `#`", snippet(line))
 	}
 }

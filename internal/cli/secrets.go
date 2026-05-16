@@ -49,7 +49,15 @@ var secretsEncryptCmd = &cobra.Command{
 		recCache := map[string][]age.Recipient{}
 		ageStrCache := map[string][]string{}
 
-		encrypted, skipped, missing := 0, 0, 0
+		// Collect per-entry failures instead of returning on the first
+		// error: if one file's recipients have a typo, we still want
+		// the user to see which OTHER files are now plaintext on disk
+		// (so they don't accidentally commit them while fixing the
+		// typo). Each entry's error is logged inline; the final
+		// warning lists every plaintext file that needs attention.
+		encrypted, skipped, missing, failed := 0, 0, 0, 0
+		var stillPlaintext []string
+		var lastErr error
 		for _, e := range entries {
 			data, err := os.ReadFile(e.absPath)
 			if err != nil {
@@ -58,7 +66,10 @@ var secretsEncryptCmd = &cobra.Command{
 					missing++
 					continue
 				}
-				return fmt.Errorf("read %s: %w", e.absPath, err)
+				fmt.Fprintf(os.Stderr, "FAIL    %s: read: %v\n", e.absPath, err)
+				failed++
+				lastErr = err
+				continue
 			}
 			if secrets.LooksEncrypted(data) {
 				fmt.Printf("skip    %s (already encrypted)\n", e.absPath)
@@ -77,37 +88,73 @@ var secretsEncryptCmd = &cobra.Command{
 			)
 			useSops, sopsFormat, err := chooseFormat(e)
 			if err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", e.absPath, err)
+				failed++
+				stillPlaintext = append(stillPlaintext, e.absPath)
+				lastErr = err
+				continue
 			}
 			if useSops {
 				ageStrs, err := ageStringsForEntry(rb, e, ageStrCache)
 				if err != nil {
-					return err
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", e.absPath, err)
+					failed++
+					stillPlaintext = append(stillPlaintext, e.absPath)
+					lastErr = err
+					continue
 				}
 				out, err = secrets.SopsEncryptBytes(data, sopsFormat, ageStrs)
 				if err != nil {
-					return fmt.Errorf("%s: %w", e.absPath, err)
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", e.absPath, err)
+					failed++
+					stillPlaintext = append(stillPlaintext, e.absPath)
+					lastErr = err
+					continue
 				}
 				mode = "sops/" + sopsFormat
 			} else {
 				recs, err := recsForEntry(rb, e, recCache)
 				if err != nil {
-					return err
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", e.absPath, err)
+					failed++
+					stillPlaintext = append(stillPlaintext, e.absPath)
+					lastErr = err
+					continue
 				}
 				out, err = secrets.Encrypt(data, recs)
 				if err != nil {
-					return fmt.Errorf("%s: %w", e.absPath, err)
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", e.absPath, err)
+					failed++
+					stillPlaintext = append(stillPlaintext, e.absPath)
+					lastErr = err
+					continue
 				}
 				mode = "age"
 			}
 			if err := atomicWrite(e.absPath, out, 0o600); err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "FAIL    %s: write: %v\n", e.absPath, err)
+				failed++
+				stillPlaintext = append(stillPlaintext, e.absPath)
+				lastErr = err
+				continue
 			}
 			fmt.Printf("OK      %s  (%s, recipients=%s)\n", e.absPath, mode, e.recipientsLabel)
 			encrypted++
 		}
-		fmt.Printf("\nencrypted=%d skipped=%d missing=%d\n", encrypted, skipped, missing)
-		if missing > 0 {
+		fmt.Printf("\nencrypted=%d skipped=%d missing=%d failed=%d\n", encrypted, skipped, missing, failed)
+		if len(stillPlaintext) > 0 {
+			fmt.Fprintln(os.Stderr, "\n⚠ WARNING: the following file(s) are STILL PLAINTEXT on disk")
+			fmt.Fprintln(os.Stderr, "  and will leak secrets if committed to git:")
+			for _, p := range stillPlaintext {
+				fmt.Fprintf(os.Stderr, "    %s\n", p)
+			}
+			fmt.Fprintln(os.Stderr, "  Fix the error(s) above and re-run `axup secrets encrypt`.")
+			fmt.Fprintln(os.Stderr, "  Wire `axup secrets status` into pre-commit to catch this automatically.")
+		}
+		switch {
+		case failed > 0:
+			return fmt.Errorf("%d file(s) failed to encrypt (last error: %w)", failed, lastErr)
+		case missing > 0:
 			return fmt.Errorf("%d declared file(s) were missing on disk", missing)
 		}
 		return nil

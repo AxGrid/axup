@@ -163,6 +163,39 @@ recipients:  /home/dev/project/recipients.txt
 Exits non-zero if anything is plaintext or missing — wire it into your
 pre-commit hook.
 
+### Pre-commit guard (recommended)
+
+`axup secrets encrypt` is best-effort: if recipients parsing fails for one
+file, the others still get encrypted, but the failing file STAYS PLAINTEXT
+on disk. A `git add .` followed by `git commit` would leak it.
+
+Two-layer defence:
+
+1. **Read the FAIL/WARNING lines** after every `axup secrets encrypt` — it
+   prints a "STILL PLAINTEXT" block listing exactly which files need fixing.
+2. **Wire `axup secrets status` into git's pre-commit hook** so the commit
+   is blocked outright if anything declared in `secrets.files` is plaintext
+   or missing:
+
+   ```sh
+   # .git/hooks/pre-commit (chmod +x)
+   #!/bin/sh
+   set -e
+   axup secrets status --rulebook deploy/rulebook.yaml
+   ```
+
+   Or via [pre-commit.com](https://pre-commit.com/), `.pre-commit-config.yaml`:
+
+   ```yaml
+   - repo: local
+     hooks:
+       - id: axup-secrets-status
+         name: axup secrets status
+         entry: axup secrets status --rulebook deploy/rulebook.yaml
+         language: system
+         pass_filenames: false
+   ```
+
 ## Identity discovery (decryption)
 
 `axup` finds the private key for decryption in this order. Each branch is
