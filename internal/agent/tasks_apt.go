@@ -71,11 +71,15 @@ func runAptTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	}
 
 	if len(todo) == 0 {
+		msg := "apt-get update completed"
+		if len(t.AptPackages) > 0 {
+			msg += "; all packages already in desired state"
+		}
 		return protocol.Event{
 			Status:  protocol.StatusChanged,
 			Stdout:  stdout.String(),
 			Stderr:  stderr.String(),
-			Message: "apt-get update completed; all packages already in desired state",
+			Message: msg,
 		}
 	}
 

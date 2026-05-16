@@ -151,10 +151,15 @@ Install or remove Debian/Ubuntu packages with `apt-get`. Idempotent via
 - name: install build chain
   apt:
     name: [build-essential, libssl-dev, pkg-config]
+
+- name: refresh apt cache only
+  apt:
+    update_cache: true            # standalone form — no name required
 ```
 
 `name:` accepts either a string or a list. `apt-get` is invoked with
-`DEBIAN_FRONTEND=noninteractive` and `--no-install-recommends`.
+`DEBIAN_FRONTEND=noninteractive` and `--no-install-recommends`. At least
+one of `name:` or `update_cache: true` is required.
 
 Status: `skipped` when every package is already in the desired state and
 `update_cache` is false; otherwise `changed`.

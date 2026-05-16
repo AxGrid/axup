@@ -181,8 +181,8 @@ func validateTasks(phase string, tasks []Task) error {
 			return fmt.Errorf("%s[%d] (%q): template requires both src and dst", phase, i, t.Name)
 		}
 		if t.Apt != nil {
-			if len(t.Apt.Name) == 0 {
-				return fmt.Errorf("%s[%d] (%q): apt requires at least one package name", phase, i, t.Name)
+			if len(t.Apt.Name) == 0 && !t.Apt.UpdateCache {
+				return fmt.Errorf("%s[%d] (%q): apt requires `name:` (a package or list), or `update_cache: true` for a standalone apt-get update", phase, i, t.Name)
 			}
 			if t.Apt.State != "" && t.Apt.State != "present" && t.Apt.State != "absent" {
 				return fmt.Errorf("%s[%d] (%q): apt state must be 'present' or 'absent', got %q", phase, i, t.Name, t.Apt.State)
