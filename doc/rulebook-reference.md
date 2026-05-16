@@ -39,8 +39,25 @@ It must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`.
 
 Every string field in a task that contains `{{ … }}` is rendered as a Go
 `text/template` against the rulebook's variables, plus the [sprig](https://masterminds.github.io/sprig/)
-function library. This applies to `command`, `dst` paths, service names,
-compose dirs, build tags, and so on — not just template-file bodies.
+function library. This applies to `command`, both `src` and `dst` paths,
+service names, compose dirs, build tags, Dockerfile paths, `creds_file`,
+`password_file`, and so on — not just template-file bodies. So a single
+rulebook task can serve every host in a group by reading a different file
+per host:
+
+```yaml
+# rulebook.yaml
+- copy:
+    src: "files/env.{{ .env }}.conf"          # prod hosts read files/env.prod.conf
+    dst: /opt/app/.env                         # stage hosts read files/env.stage.conf
+```
+
+```yaml
+# inventory.yaml
+hosts:
+  prod-1:  { address: 10.1.1.10, vars: { env: prod } }
+  stage-1: { address: 10.2.1.10, vars: { env: stage } }
+```
 
 Built-in variables automatically merged into `vars:` if not already set:
 

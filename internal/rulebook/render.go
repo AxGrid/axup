@@ -59,18 +59,30 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 		t.Command = s
 	}
 	if t.Copy != nil {
-		s, err := renderString(t.Copy.Dst, vars)
-		if err != nil {
+		// Render both src and dst so a host can choose its own input file via
+		// inventory vars: `src: secrets/env.{{ .env }}.yaml`.
+		if s, err := renderString(t.Copy.Src, vars); err == nil {
+			t.Copy.Src = s
+		} else {
 			return err
 		}
-		t.Copy.Dst = s
+		if s, err := renderString(t.Copy.Dst, vars); err == nil {
+			t.Copy.Dst = s
+		} else {
+			return err
+		}
 	}
 	if t.Template != nil {
-		s, err := renderString(t.Template.Dst, vars)
-		if err != nil {
+		if s, err := renderString(t.Template.Src, vars); err == nil {
+			t.Template.Src = s
+		} else {
 			return err
 		}
-		t.Template.Dst = s
+		if s, err := renderString(t.Template.Dst, vars); err == nil {
+			t.Template.Dst = s
+		} else {
+			return err
+		}
 	}
 	if t.Apt != nil {
 		for i, n := range t.Apt.Name {
@@ -117,6 +129,13 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 			}
 			t.DockerBuild.Context = s
 		}
+		if t.DockerBuild.Dockerfile != "" {
+			s, err := renderString(t.DockerBuild.Dockerfile, vars)
+			if err != nil {
+				return err
+			}
+			t.DockerBuild.Dockerfile = s
+		}
 		for k, v := range t.DockerBuild.BuildArgs {
 			s, err := renderString(v, vars)
 			if err != nil {
@@ -133,6 +152,18 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 		}
 		if s, err := renderString(t.DockerLogin.Username, vars); err == nil {
 			t.DockerLogin.Username = s
+		} else {
+			return err
+		}
+		// Render the creds-file location so projects can swap per-env keys
+		// (`creds_file: secrets/registry.{{ .env }}.yaml`).
+		if s, err := renderString(t.DockerLogin.CredsFile, vars); err == nil {
+			t.DockerLogin.CredsFile = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.DockerLogin.PasswordFile, vars); err == nil {
+			t.DockerLogin.PasswordFile = s
 		} else {
 			return err
 		}

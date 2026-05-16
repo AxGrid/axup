@@ -12,6 +12,14 @@ bootstrap:
       dst: "{{ .target }}"
       mode: "0644"
 
+  # Per-environment file picked by the host's inventory var: prod hosts get
+  # files/env.prod, stage hosts get files/env.stage.
+  - name: install per-env config
+    copy:
+      src: "files/env.{{ .env }}"
+      dst: "/opt/multihost-env-{{ .env }}.conf"
+      mode: "0644"
+
   - name: announce
     command: 'echo "{{ .env }}/{{ .node }} wrote {{ .target }}"'
     when_changed:
