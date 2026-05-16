@@ -45,12 +45,79 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 - **`axup bootstrap --check`** (dry-run): see what would change without applying anything
 - **External rulebook modules**: declare `deps:` with `{git, version}`, lock to SHAs, import sub-rulebooks via `use: common/mysql8`
 - **Inventory + multi-host**: optional `inventory.yaml` with named hosts, groups, and per-host vars; `--group prod` fans out in parallel via errgroup
-- **age-encrypted secrets**: public keys committed to the repo via `recipients.txt`, transparent decrypt at deploy time, multiple identities supported (per-developer keys, SSH keys, `~/.config/age/keys.txt`)
+- **Two encryption backends, auto-routed by extension**: sops-style structural for YAML/JSON/INI/ENV/TOML (leaf values encrypted, keys still readable in PR diffs); whole-file age armor for everything else (binaries, certs, .conf). One `recipients.txt`, one identity-discovery chain, transparent decrypt at deploy time. See [Encryption](#encryption) below.
 - **Auth modes**: SSH key (auto-discover or `--key`), SSH password (`--password` / `--ask-password`), sudo with or without password (`--sudo` / `--sudo-password` / `--ask-sudo-password`)
 - **Docker pipeline**: build images locally with `docker buildx`, push to your registry with `docker_login` creds, pull on the remote via `docker_compose pull` — all chained from one rulebook
 - **`make install`**: drops `axup` into `$(PREFIX)/bin` (default `/usr/local`, override `PREFIX=$HOME/.local` to avoid sudo)
 - **Colored output** with per-host summaries and a content-detecting plain/encrypted file path — `NO_COLOR` and `--no-color` honored
 - **Git auto-vars**: `git_sha`, `git_short_sha`, `git_branch`, `git_dirty` are injected into the template context automatically — handy for `tag: "myapi:{{ .git_short_sha }}"`
+
+## Encryption
+
+axup ships two encryption backends in one binary — both use [age](https://age-encryption.org/) keys but apply them differently. The mode is chosen automatically by the file's extension:
+
+| Extension | Mode | What the encrypted file looks like |
+|---|---|---|
+| `.yaml` `.yml` `.json` `.ini` `.toml` `.env` | **sops-style structural** — leaf values encrypted, keys remain plaintext | git-diffable; reviewers can see which key changed |
+| anything else (`.pem`, `.conf`, `.crt`, binaries, …) | **whole-file age armor** | opaque base64 blob between `BEGIN/END AGE ENCRYPTED FILE` markers |
+
+Trailing template suffixes (`.tmpl`, `.template`, `.j2`) are stripped before the lookup — `inventory.prod.yaml.tmpl` still routes to sops.
+
+### What the difference looks like
+
+A sops-encrypted YAML keeps shape:
+
+```yaml
+db:
+  host: ENC[AES256_GCM,data:nxD+apD5g5voN50=,iv:...,tag:...,type:str]
+  port: ENC[AES256_GCM,data:9ytE4w==,iv:...,tag:...,type:int]
+  password: ENC[AES256_GCM,data:pHTWmctrdQAGtolHiTWxi/UmeHA=,...]
+sops:
+  age:
+    - recipient: age10qd5pvuuvtpqv79rr4qgy87x7x3zgfkphcd5hkcalpkh8pfcvsms8aycgg
+      enc: |
+        -----BEGIN AGE ENCRYPTED FILE-----
+        ...
+    version: 3.13.1
+```
+
+A reviewer sees *which key* changed (`db.password`), not the value. Merge conflicts resolve per-line. A whole-file age blob can't do either — change one byte, the base64 changes from `BEGIN` to `END`.
+
+### Recipients
+
+Both modes read the same `recipients.txt`:
+
+```
+# Anyone listed here can decrypt. age1... lines are accepted by both
+# backends; ssh-* lines work only for whole-file age (sops doesn't
+# accept SSH keys without ssh-to-age conversion).
+age10qd5pvuuvtpqv79rr4qgy87x7x3zgfkphcd5hkcalpkh8pfcvsms8aycgg   alice
+age1y4mw...                                                       bob
+ssh-ed25519 AAAA…                                                ci@build
+```
+
+Per-file recipient overrides in the rulebook let one project lock different files to different keysets — common pattern is stage vs prod:
+
+```yaml
+secrets:
+  recipients_file: recipients.stage.txt    # default for any file below
+  files:
+    - secrets/db.pw                        # uses default
+    - path: inventory.stage.yaml           # explicit override
+      recipients: recipients.stage.txt
+    - path: inventory.prod.yaml
+      recipients: recipients.prod.txt      # locked to prod keyring
+```
+
+### Decryption is automatic
+
+Files don't carry a "what backend" marker — `axup` sniffs the content (`-----BEGIN AGE…` → age; `ENC[AES256_GCM,…` anywhere in the body → sops). All tasks that read encrypted files (`docker_login.creds_file`, `--inventory`, …) do this transparently.
+
+### No runtime dependencies
+
+The sops backend uses the official sops Go library ([github.com/getsops/sops/v3](https://github.com/getsops/sops/v3)) linked directly into `axup` — no separate `sops` binary on PATH required. Cost: the CLI binary is ~46 MB (the polymorphic key-source design pulls in cloud-KMS sub-packages even though axup only uses age).
+
+Full reference + identity-discovery chain in [doc/secrets.md](doc/secrets.md).
 
 ## Documentation
 
@@ -59,7 +126,7 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 | [Getting started](doc/getting-started.md) | Build, scaffold, first bootstrap and deploy in ~5 minutes |
 | [Rulebook reference](doc/rulebook-reference.md) | Every task type and field, with copy-paste-ready YAML |
 | [Inventory & multi-host](doc/inventory-multi-host.md) | `inventory.yaml`, `--host` vs `--group`, per-host vars, parallel runs |
-| [Secrets (age)](doc/secrets.md) | Recipients, encryption, identity discovery, multi-developer setup |
+| [Secrets (age + sops)](doc/secrets.md) | Both backends, recipients, identity discovery, multi-developer setup, per-file recipients |
 | [External rulebooks](doc/external-rulebooks.md) | `deps:`, `use:`, `axup.lock`, module layout, var merge precedence |
 | [CLI reference](doc/cli-reference.md) | Every command, every flag, every env var |
 
