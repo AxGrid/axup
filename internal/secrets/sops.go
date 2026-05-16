@@ -198,7 +198,7 @@ func SopsDecryptBytes(data []byte, format string) ([]byte, error) {
 	}
 	dataKey, err := decryptDataKey(&tree)
 	if err != nil {
-		return nil, fmt.Errorf("sops decrypt data key: %w", err)
+		return nil, fmt.Errorf("sops decrypt data key: %w\n\n%s\n\nFixes:\n  - point at a recipient key: --age-key /path/to/key.txt (or $AXUP_AGE_KEY)\n  - or re-encrypt with your public key added to recipients.txt:\n      axup secrets encrypt", err, IdentityHints())
 	}
 	cipher := aes.NewCipher()
 	if _, err := tree.Decrypt(dataKey, cipher); err != nil {
@@ -267,7 +267,11 @@ func setSopsAgeEnv() (func(), error) {
 		}
 	}
 	if len(secretKeys) == 0 {
-		return func() {}, fmt.Errorf("no age1... secret keys for sops decrypt (loaded identities from %s; sops doesn't accept SSH keys)", src)
+		hint := src
+		if hint == "" {
+			hint = "(none)"
+		}
+		return func() {}, fmt.Errorf("no age1... secret keys available for sops decrypt — loaded identities from %s, but sops accepts only AGE-SECRET-KEY-… (SSH keys not supported here).\n\n%s", hint, IdentityHints())
 	}
 	prev, hadPrev := os.LookupEnv(sopsage.SopsAgeKeyEnv)
 	if err := os.Setenv(sopsage.SopsAgeKeyEnv, strings.Join(secretKeys, "\n")); err != nil {

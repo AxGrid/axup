@@ -113,18 +113,34 @@ func decryptAge(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("file is age-encrypted but no decryption identity is available — pass --age-key PATH, set $AXUP_AGE_KEY, or put a key at ~/.config/age/keys.txt")
+		return nil, fmt.Errorf("file is age-encrypted but no decryption identity was found.\n\n%s", IdentityHints())
 	}
 	r := armor.NewReader(bytes.NewReader(data))
 	dec, err := age.Decrypt(r, ids...)
 	if err != nil {
-		return nil, fmt.Errorf("age decrypt (tried identity from %s): %w", src, err)
+		return nil, fmt.Errorf("age decrypt: %w\n  tried: %s\n\n%s\n\nFixes:\n  - point at a recipient key: --age-key /path/to/key.txt (or $AXUP_AGE_KEY)\n  - or re-encrypt the file with your public key added to recipients.txt:\n      axup secrets encrypt", err, src, IdentityHints())
 	}
 	out, err := io.ReadAll(dec)
 	if err != nil {
 		return nil, fmt.Errorf("age decrypt: read: %w", err)
 	}
 	return out, nil
+}
+
+// IdentityHints returns a multi-line block enumerating every place axup
+// looks for an age identity and every way to override that lookup. Used
+// inline in decrypt failure messages so the user doesn't have to read
+// docs to find out where to drop a key (or which flag to pass).
+//
+// Public because the CLI surfaces it in a few error wrappers outside
+// the secrets package — keeping one canonical copy avoids drift when
+// the lookup order changes.
+func IdentityHints() string {
+	return "axup looks for age identities in this order:\n" +
+		"  1. --age-key PATH                       (CLI flag, repeatable)\n" +
+		"  2. $AXUP_AGE_KEY                        (env var, colon-separated path list)\n" +
+		"  3. ~/.config/age/keys.txt               (canonical age identity file)\n" +
+		"  4. ~/.ssh/id_ed25519, id_rsa, id_ecdsa  (SSH keys, auto-discovered)"
 }
 
 // Encrypt armors `data` against `recipients`. Used by `deploy secrets encrypt`.
