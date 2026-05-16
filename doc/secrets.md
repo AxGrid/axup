@@ -94,6 +94,44 @@ Each `files:` entry is either a bare string (just a path) or a mapping with:
 | `path` (required) | File path, relative to rulebook dir. |
 | `recipients` | Override `recipients_file` for this file only (e.g. stage vs prod keyrings in one rulebook). |
 | `format` | `""` / `auto` (default) → pick by extension. `age` → force whole-file age (use when recipients are ssh-\* keys, since sops only accepts age1…). `sops` → force sops (only valid for `.yaml/.yml/.json/.ini/.env/.toml`). |
+| `decrypted_to` | Switches the entry to **pair mode**. `path` is the committed encrypted file; `decrypted_to` is the plaintext working copy that `axup secrets unseal` materialises and `axup secrets seal` re-encrypts. `axup secrets unseal` also appends `decrypted_to` to the nearest `.gitignore` automatically. |
+
+### Pair mode (encrypted-at-rest + plaintext working copy)
+
+Two-file workflow for inventories and configs you want to **edit as plaintext**
+but **commit as encrypted**:
+
+```yaml
+secrets:
+  files:
+    - path: inventory.prod.enc.yaml         # committed, encrypted
+      decrypted_to: inventory.prod.yaml     # gitignored, plaintext
+      recipients: recipients.prod.txt
+      format: age
+```
+
+Usage:
+
+```sh
+axup secrets unseal      # decrypts every .enc → plaintext, adds to .gitignore
+$EDITOR inventory.prod.yaml
+axup secrets seal        # re-encrypts plaintext → .enc, ready to commit
+git add inventory.prod.enc.yaml && git commit
+```
+
+Pair entries are skipped by `encrypt` / `decrypt FILE` (with a hint pointing
+at `seal` / `unseal`) — those verbs are for in-place entries (no
+`decrypted_to`). `secrets status` reports both `path` (encrypted/missing) and
+`decrypted_to` (plaintext/not-on-disk) for each pair entry.
+
+The auto-`.gitignore` block looks like this and is idempotent across runs:
+
+```
+# Plaintext working copies of axup secrets — never commit.
+# (axup secrets unseal manages this block.)
+inventory.prod.yaml
+inventory.stage.yaml
+```
 
 ## CLI commands
 

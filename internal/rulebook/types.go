@@ -91,6 +91,13 @@ type SecretsSpec struct {
 //	                                            #   files is "sops"; "age" forces the
 //	                                            #   whole-file mode so ssh-* recipients
 //	                                            #   keep working on .yaml/.json/.env/…)
+//	  - path: inventory.prod.enc.yaml           # pair mode: `path` is the encrypted
+//	    decrypted_to: inventory.prod.yaml       #   file committed to git, `decrypted_to`
+//	    recipients: recipients.prod.txt         #   is the plaintext working copy that
+//	    format: age                             #   `axup secrets unseal` materialises and
+//	                                            #   `axup secrets seal` re-encrypts back.
+//	                                            #   axup auto-adds decrypted_to to the
+//	                                            #   nearest .gitignore.
 //
 // Per-file `recipients` lets one rulebook manage several recipient groups —
 // e.g. one age-key set scoped to stage hosts, another scoped to prod.
@@ -102,11 +109,23 @@ type SecretsSpec struct {
 //     recipients are ssh-* keys (sops only takes age1… recipients).
 //   - "sops": force sops (only valid for the structured extensions listed
 //     above; recipients must be age1…).
+//
+// `decrypted_to`, when set, switches the entry to "pair mode" — `path` is the
+// committed encrypted file, `decrypted_to` is the plaintext working file. Use
+// `seal`/`unseal` to move bytes between them. `encrypt`/`decrypt` skip pair
+// entries (with a hint). Entries without `decrypted_to` keep the in-place
+// behaviour: `path` is encrypted in-place.
 type SecretFile struct {
-	Path       string `yaml:"path"`                 // path relative to rulebook dir
-	Recipients string `yaml:"recipients,omitempty"` // optional override of SecretsSpec.RecipientsFile
-	Format     string `yaml:"format,omitempty"`     // "age", "sops", or "" (auto by extension)
+	Path         string `yaml:"path"`                    // path relative to rulebook dir
+	Recipients   string `yaml:"recipients,omitempty"`    // optional override of SecretsSpec.RecipientsFile
+	Format       string `yaml:"format,omitempty"`        // "age", "sops", or "" (auto by extension)
+	DecryptedTo  string `yaml:"decrypted_to,omitempty"`  // optional: plaintext target for `unseal`; presence switches the entry to pair mode
 }
+
+// IsPair reports whether this entry uses the pair (encrypted-at-rest +
+// plaintext-on-disk) model. Pair entries are handled by `seal` / `unseal`;
+// non-pair entries by `encrypt` / `decrypt` in place.
+func (s SecretFile) IsPair() bool { return s.DecryptedTo != "" }
 
 // UnmarshalYAML accepts either a bare string or a {path, recipients} mapping.
 // Keeps `files: [a.yaml, b.yaml]` working while allowing the longer form for

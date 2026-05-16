@@ -59,6 +59,16 @@ var secretsEncryptCmd = &cobra.Command{
 		var stillPlaintext []string
 		var lastErr error
 		for _, e := range entries {
+			// Pair entries (with decrypted_to:) belong to the seal/unseal
+			// workflow. Encrypt is for in-place entries only — point the
+			// user at the right verb rather than silently doing the wrong
+			// thing to the encrypted file at `path`.
+			if e.entry.IsPair() {
+				fmt.Printf("skip    %s (pair entry — use `axup secrets seal` to encrypt %s → %s)\n",
+					e.absPath, e.entry.DecryptedTo, e.entry.Path)
+				skipped++
+				continue
+			}
 			data, err := os.ReadFile(e.absPath)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -289,6 +299,272 @@ var secretsEditCmd = &cobra.Command{
 	},
 }
 
+// secretsSealCmd walks pair entries and encrypts each `decrypted_to`
+// (plaintext, gitignored working copy) into `path` (committed encrypted
+// file). Non-pair entries are skipped — they belong to `encrypt`.
+var secretsSealCmd = &cobra.Command{
+	Use:   "seal",
+	Short: "Encrypt every pair entry's `decrypted_to` (plaintext) → `path` (encrypted)",
+	Long: `For every entry in secrets.files that has a decrypted_to: field, read the
+plaintext working copy, encrypt it with the entry's recipients, and write
+the result to the committed path. Mirrors ` + "`unseal`" + `.
+
+Entries without decrypted_to: are skipped — use ` + "`encrypt`" + ` for those.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rb, err := loadRulebookHeader(secretsRulebook)
+		if err != nil {
+			return err
+		}
+		if rb.Secrets == nil || len(rb.Secrets.Files) == 0 {
+			return fmt.Errorf("no secrets.files declared in %s", secretsRulebook)
+		}
+		recCache := map[string][]age.Recipient{}
+		ageStrCache := map[string][]string{}
+		sealed, skipped, failed := 0, 0, 0
+		var lastErr error
+		for _, f := range rb.Secrets.Files {
+			if !f.IsPair() {
+				skipped++
+				continue
+			}
+			e := toResolved(rb, f)
+			srcAbs := f.DecryptedTo
+			if !filepath.IsAbs(srcAbs) {
+				srcAbs = filepath.Join(rb.Dir, srcAbs)
+			}
+			plain, err := os.ReadFile(srcAbs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: read plaintext %s: %v\n", f.Path, srcAbs, err)
+				failed++
+				lastErr = err
+				continue
+			}
+			if secrets.LooksEncrypted(plain) {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: %s is already encrypted — refusing to double-encrypt\n", f.Path, srcAbs)
+				failed++
+				lastErr = fmt.Errorf("decrypted_to already encrypted")
+				continue
+			}
+			useSops, sopsFormat, err := chooseFormat(e)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", f.Path, err)
+				failed++
+				lastErr = err
+				continue
+			}
+			var (
+				out  []byte
+				mode string
+			)
+			if useSops {
+				ageStrs, err := ageStringsForEntry(rb, e, ageStrCache)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", f.Path, err)
+					failed++
+					lastErr = err
+					continue
+				}
+				out, err = secrets.SopsEncryptBytes(plain, sopsFormat, ageStrs)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", f.Path, err)
+					failed++
+					lastErr = err
+					continue
+				}
+				mode = "sops/" + sopsFormat
+			} else {
+				recs, err := recsForEntry(rb, e, recCache)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", f.Path, err)
+					failed++
+					lastErr = err
+					continue
+				}
+				out, err = secrets.Encrypt(plain, recs)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "FAIL    %s: %v\n", f.Path, err)
+					failed++
+					lastErr = err
+					continue
+				}
+				mode = "age"
+			}
+			if err := atomicWrite(e.absPath, out, 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: write: %v\n", f.Path, err)
+				failed++
+				lastErr = err
+				continue
+			}
+			fmt.Printf("SEAL    %s → %s  (%s, recipients=%s)\n", f.DecryptedTo, f.Path, mode, e.recipientsLabel)
+			sealed++
+		}
+		fmt.Printf("\nsealed=%d skipped=%d failed=%d\n", sealed, skipped, failed)
+		if failed > 0 {
+			return fmt.Errorf("%d pair file(s) failed to seal (last error: %w)", failed, lastErr)
+		}
+		return nil
+	},
+}
+
+// secretsUnsealCmd walks pair entries and decrypts each `path` (encrypted)
+// into `decrypted_to` (plaintext working copy). Auto-adds decrypted_to to
+// the rulebook-dir .gitignore so the plaintext doesn't accidentally land
+// in git.
+var secretsUnsealCmd = &cobra.Command{
+	Use:   "unseal",
+	Short: "Decrypt every pair entry's `path` (encrypted) → `decrypted_to` (plaintext)",
+	Long: `For every entry in secrets.files that has a decrypted_to: field, decrypt the
+committed encrypted file and write the plaintext to decrypted_to. Mirrors
+` + "`seal`" + `.
+
+Run this before ` + "`axup deploy`" + ` if your deploy reads plaintext working
+files (e.g. ` + "`--inventory inventory.prod.yaml`" + ` where the committed copy is
+` + "`inventory.prod.enc.yaml`" + `). axup also auto-appends decrypted_to to the
+nearest .gitignore so plaintext never accidentally lands in a commit.
+
+Entries without decrypted_to: are skipped — for those, ` + "`secrets decrypt FILE`" + `
+prints plaintext to stdout (no on-disk write).`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		rb, err := loadRulebookHeader(secretsRulebook)
+		if err != nil {
+			return err
+		}
+		if rb.Secrets == nil || len(rb.Secrets.Files) == 0 {
+			return fmt.Errorf("no secrets.files declared in %s", secretsRulebook)
+		}
+		unsealed, skipped, failed := 0, 0, 0
+		var lastErr error
+		var ignoreRels []string
+		for _, f := range rb.Secrets.Files {
+			if !f.IsPair() {
+				skipped++
+				continue
+			}
+			srcAbs := f.Path
+			if !filepath.IsAbs(srcAbs) {
+				srcAbs = filepath.Join(rb.Dir, srcAbs)
+			}
+			data, err := os.ReadFile(srcAbs)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: read encrypted %s: %v\n", f.Path, srcAbs, err)
+				failed++
+				lastErr = err
+				continue
+			}
+			if !secrets.LooksEncrypted(data) {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: %s is not encrypted — refusing to overwrite decrypted_to with raw bytes\n", f.Path, srcAbs)
+				failed++
+				lastErr = fmt.Errorf("path not encrypted")
+				continue
+			}
+			plain, err := decryptForUnseal(srcAbs, data)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: decrypt: %v\n", f.Path, err)
+				failed++
+				lastErr = err
+				continue
+			}
+			dstAbs := f.DecryptedTo
+			if !filepath.IsAbs(dstAbs) {
+				dstAbs = filepath.Join(rb.Dir, dstAbs)
+			}
+			if err := atomicWrite(dstAbs, plain, 0o600); err != nil {
+				fmt.Fprintf(os.Stderr, "FAIL    %s: write plaintext: %v\n", f.Path, err)
+				failed++
+				lastErr = err
+				continue
+			}
+			fmt.Printf("UNSEAL  %s → %s  (mode=600)\n", f.Path, f.DecryptedTo)
+			unsealed++
+			ignoreRels = append(ignoreRels, f.DecryptedTo)
+		}
+		if len(ignoreRels) > 0 {
+			added, err := ensureGitignored(rb.Dir, ignoreRels)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not update .gitignore: %v\n", err)
+			} else if len(added) > 0 {
+				fmt.Printf("\nappended %d entrie(s) to %s/.gitignore: %s\n",
+					len(added), rb.Dir, strings.Join(added, ", "))
+			}
+		}
+		fmt.Printf("\nunsealed=%d skipped=%d failed=%d\n", unsealed, skipped, failed)
+		if failed > 0 {
+			return fmt.Errorf("%d pair file(s) failed to unseal (last error: %w)", failed, lastErr)
+		}
+		return nil
+	},
+}
+
+// decryptForUnseal mirrors the dispatch logic from `secrets decrypt FILE`:
+// honour the explicit format hint from the file extension when applicable,
+// otherwise fall through to the unified Decrypt() (which itself prefers the
+// age armor header over the sops marker, see secrets.Decrypt).
+func decryptForUnseal(path string, data []byte) ([]byte, error) {
+	if secrets.LooksAgeEncrypted(data) {
+		return secrets.Decrypt(data)
+	}
+	if format := secrets.SopsFormat(path); format != "" && secrets.LooksSopsEncrypted(data) {
+		return secrets.SopsDecryptBytes(data, format)
+	}
+	return secrets.Decrypt(data)
+}
+
+// ensureGitignored makes sure each rel path is present in
+// `<rulebookDir>/.gitignore`. Creates the file if missing. Returns the
+// list of entries actually appended (existing ones are left alone).
+//
+// The match is exact-line, anchored — we treat `.gitignore` as a flat
+// "set of paths" rather than parsing globs. That's good enough for the
+// "decrypted_to landed in git" failure mode, and it never widens the
+// ignore (we only add specific paths, never wildcards).
+func ensureGitignored(dir string, rels []string) ([]string, error) {
+	path := filepath.Join(dir, ".gitignore")
+	var existing []string
+	body, err := os.ReadFile(path)
+	if err == nil {
+		for _, line := range strings.Split(string(body), "\n") {
+			existing = append(existing, strings.TrimSpace(line))
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for _, e := range existing {
+		have[e] = true
+	}
+	var added []string
+	for _, r := range rels {
+		// Try both the bare relative path and a leading-slash anchored
+		// form ("/foo") to be tolerant of both styles.
+		if have[r] || have["/"+r] {
+			continue
+		}
+		added = append(added, r)
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if len(body) > 0 && !strings.HasSuffix(string(body), "\n") {
+		if _, err := f.WriteString("\n"); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := f.WriteString("\n# Plaintext working copies of axup secrets — never commit.\n# (axup secrets unseal manages this block.)\n"); err != nil {
+		return nil, err
+	}
+	for _, r := range added {
+		if _, err := f.WriteString(r + "\n"); err != nil {
+			return nil, err
+		}
+	}
+	return added, nil
+}
+
 var secretsStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show the state (encrypted / plaintext / missing) of every file in secrets.files",
@@ -332,7 +608,23 @@ var secretsStatusCmd = &cobra.Command{
 			if f.Recipients != "" {
 				recLabel = "  (recipients=" + f.Recipients + ")"
 			}
-			fmt.Printf("  %-10s %s%s\n", label, f.Path, recLabel)
+			fmt.Printf("  %-16s %s%s\n", label, f.Path, recLabel)
+			// For pair entries, also report the state of decrypted_to: if
+			// it exists on disk and isn't gitignored, that's a plaintext
+			// leak risk. If it's missing, `unseal` will materialise it.
+			if f.IsPair() {
+				dst := f.DecryptedTo
+				if !filepath.IsAbs(dst) {
+					dst = filepath.Join(rb.Dir, dst)
+				}
+				dstLabel := "plaintext"
+				if _, err := os.Stat(dst); os.IsNotExist(err) {
+					dstLabel = "not-on-disk"
+				} else if err != nil {
+					return err
+				}
+				fmt.Printf("    └─ decrypted_to: %-12s %s\n", dstLabel, f.DecryptedTo)
+			}
 		}
 		if bad > 0 {
 			return fmt.Errorf("%d file(s) not in the expected encrypted state", bad)
@@ -610,5 +902,5 @@ func indexOf(s, sub string) int {
 
 func init() {
 	secretsCmd.PersistentFlags().StringVar(&secretsRulebook, "rulebook", "rulebook.yaml", "Path to rulebook.yaml (used to find recipients.txt + secrets.files)")
-	secretsCmd.AddCommand(secretsEncryptCmd, secretsDecryptCmd, secretsEditCmd, secretsStatusCmd)
+	secretsCmd.AddCommand(secretsEncryptCmd, secretsDecryptCmd, secretsEditCmd, secretsSealCmd, secretsUnsealCmd, secretsStatusCmd)
 }
