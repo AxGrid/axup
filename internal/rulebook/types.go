@@ -9,16 +9,41 @@ import (
 type Rulebook struct {
 	Name      string         `yaml:"name"`
 	Vars      map[string]any `yaml:"vars,omitempty"`
-	Bootstrap []Task         `yaml:"bootstrap,omitempty"`
-	Deploy    []Task         `yaml:"deploy,omitempty"`
+	Deps      []DepSpec      `yaml:"deps,omitempty"`      // top-level only
+	Bootstrap []Task         `yaml:"bootstrap,omitempty"` // top-level only
+	Deploy    []Task         `yaml:"deploy,omitempty"`    // top-level only
+	Tasks     []Task         `yaml:"tasks,omitempty"`     // module form: a single reusable list
+	Secrets   *SecretsSpec   `yaml:"secrets,omitempty"`   // declarative encrypted-files list
 
 	// Dir is the directory containing the rulebook.yaml, used to resolve
 	// relative src paths in copy/template tasks. Set by Load, not parsed.
 	Dir string `yaml:"-"`
 }
 
+// SecretsSpec declares which files in the project are managed by `deploy
+// secrets` (encrypt in place against the recipients listed in recipients.txt).
+// Used by `deploy secrets encrypt` (no args) to iterate the list and by
+// `deploy secrets status` to surface plaintext-leftover problems.
+//
+// The runtime decrypt path (when a task reads a creds_file / password_file) is
+// independent — it auto-detects ciphertext by content, regardless of whether
+// the file is declared here. So the block is opt-in convenience, not enforcement.
+type SecretsSpec struct {
+	RecipientsFile string   `yaml:"recipients_file,omitempty"` // default: recipients.txt next to rulebook
+	Files          []string `yaml:"files,omitempty"`           // paths relative to rulebook dir
+}
+
+// DepSpec declares a git repository whose modules are imported via `use:`.
+type DepSpec struct {
+	Name    string `yaml:"name"`    // local handle used in `use: <name>/<path>`
+	Git     string `yaml:"git"`     // "github.com/foo/bar", "git@…", or "https://…"
+	Version string `yaml:"version"` // tag, branch, or commit sha
+}
+
 // Task is exactly one of: command, copy, template, apt, service,
-// docker_compose, docker_install.
+// docker_compose, docker_install, docker_build, docker_login, or use.
+// `use` is special — it's a reference to a module that gets inlined at parse
+// time and disappears from the final task list.
 type Task struct {
 	Name          string             `yaml:"name,omitempty"`
 	Command       string             `yaml:"command,omitempty"`
@@ -30,7 +55,15 @@ type Task struct {
 	DockerInstall *DockerInstallSpec `yaml:"docker_install,omitempty"`
 	DockerBuild   *DockerBuildSpec   `yaml:"docker_build,omitempty"`
 	DockerLogin   *DockerLoginSpec   `yaml:"docker_login,omitempty"`
+	Use           string             `yaml:"use,omitempty"`  // "<dep>/<module_path>"
+	Vars          map[string]any     `yaml:"vars,omitempty"` // passed to the imported module
 	WhenChanged   []string           `yaml:"when_changed,omitempty"`
+
+	// EffectiveVars carries the merged var context for tasks that came from a
+	// use: expansion (module defaults < caller < pre-rendered use.vars). It is
+	// nil for top-level tasks, in which case rb.Vars is used. Not parsed from
+	// YAML — set by the expander.
+	EffectiveVars map[string]any `yaml:"-"`
 }
 
 type CopySpec struct {
@@ -84,11 +117,23 @@ type DockerBuildSpec struct {
 
 // DockerLoginSpec runs `docker login` against a registry, by default both on
 // the CLI host (so local `docker_build --push` works) and on the remote (so
-// `docker_compose` can pull private images). Exactly one password source must
-// be set.
+// `docker_compose` can pull private images).
+//
+// Credentials come from one of two sources:
+//
+//   - creds_file: a per-project YAML file containing {username, password}.
+//     Path is relative to the rulebook dir if not absolute. This is the
+//     preferred form because it keeps creds out of the rulebook and out of
+//     git (secrets/ is gitignored), and the file format is forward-compatible
+//     with planned age/sops encryption — the CLI will detect ciphertext and
+//     decrypt transparently in a later phase.
+//
+//   - inline username + (password | password_file | password_env): legacy
+//     form. Useful when you already have a password in an env var (e.g. CI).
 type DockerLoginSpec struct {
 	Registry     string `yaml:"registry"`
-	Username     string `yaml:"username"`
+	CredsFile    string `yaml:"creds_file,omitempty"`    // path to YAML with {username, password}
+	Username     string `yaml:"username,omitempty"`      // unused when creds_file is set
 	Password     string `yaml:"password,omitempty"`      // inline (least preferred)
 	PasswordFile string `yaml:"password_file,omitempty"` // path relative to rulebook
 	PasswordEnv  string `yaml:"password_env,omitempty"`  // read $VAR at parse time
@@ -136,6 +181,8 @@ func (t Task) Kind() string {
 		return "docker_build"
 	case t.DockerLogin != nil:
 		return "docker_login"
+	case t.Use != "":
+		return "use"
 	default:
 		return ""
 	}

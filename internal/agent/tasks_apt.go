@@ -40,6 +40,18 @@ func runAptTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return protocol.Event{Status: protocol.StatusSkipped, Message: "all packages already in desired state"}
 	}
 
+	if ctx.dryRun {
+		verb := "install"
+		if state == "absent" {
+			verb = "remove"
+		}
+		msg := fmt.Sprintf("would %s %d package(s): %s", verb, len(todo), strings.Join(todo, ", "))
+		if len(todo) == 0 {
+			msg = "would run apt-get update (no packages to install/remove)"
+		}
+		return protocol.Event{Status: protocol.StatusWouldChange, Message: msg}
+	}
+
 	env := []string{"DEBIAN_FRONTEND=noninteractive"}
 	var stdout, stderr bytes.Buffer
 

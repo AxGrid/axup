@@ -23,13 +23,20 @@ const defaultFileMode os.FileMode = 0o644
 type runCtx struct {
 	state   *State
 	changed map[string]bool // paths written this run, keyed by absolute dst path
+	dryRun  bool            // when true, handlers report would_change but don't apply
 }
 
-func newRunCtx(s *State) *runCtx {
-	return &runCtx{state: s, changed: map[string]bool{}}
+func newRunCtx(s *State, dryRun bool) *runCtx {
+	return &runCtx{state: s, changed: map[string]bool{}, dryRun: dryRun}
 }
 
 func runCommandTask(ctx *runCtx, t protocol.Task) protocol.Event {
+	if ctx.dryRun {
+		return protocol.Event{
+			Status:  protocol.StatusWouldChange,
+			Message: "would run: " + t.Command,
+		}
+	}
 	cmd := exec.Command("/bin/sh", "-c", t.Command)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -104,13 +111,27 @@ func runFileTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	}
 
 	if exists && currentSha == desiredSha && currentMode == mode {
-		// Nothing to do; refresh the state row so updated_at advances.
-		ctx.state.Files[t.DstPath] = &FileState{
-			Sha256:    desiredSha,
-			Mode:      modeStr,
-			AppliedAt: ctx.state.Files[t.DstPath].appliedAtOrNow(),
+		// Nothing to do; refresh the state row so updated_at advances. In
+		// dry-run we don't mutate state, but the answer is still "skipped".
+		if !ctx.dryRun {
+			ctx.state.Files[t.DstPath] = &FileState{
+				Sha256:    desiredSha,
+				Mode:      modeStr,
+				AppliedAt: ctx.state.Files[t.DstPath].appliedAtOrNow(),
+			}
 		}
 		return protocol.Event{Status: protocol.StatusSkipped, Path: t.DstPath}
+	}
+
+	if ctx.dryRun {
+		// Mark this path as "would have changed" so a follow-up command with
+		// when_changed shows up in the preview too.
+		ctx.changed[t.DstPath] = true
+		msg := "would write"
+		if exists {
+			msg = "would overwrite"
+		}
+		return protocol.Event{Status: protocol.StatusWouldChange, Path: t.DstPath, Message: msg}
 	}
 
 	if err := os.MkdirAll(filepath.Dir(t.DstPath), 0o755); err != nil {

@@ -3,23 +3,38 @@ name: echoapp
 vars:
   app_name: echoapp
   app_port: 8081
-  image: registry.example.com/echoapp   # override before push
+  image: registry.axgrid.com/cubeseb/echoapp
   # git_sha / git_short_sha / git_branch / git_dirty are injected automatically
+
+# Declarative list of encrypted files in this project. Used by:
+#   deploy secrets encrypt    (no args → encrypt everything declared here)
+#   deploy secrets status     (report each file's encrypted/plaintext state)
+# Decryption at runtime is content-detection-based and works regardless of
+# whether the file is listed here.
+secrets:
+  recipients_file: recipients.txt   # default; relative to rulebook dir
+  files:
+    - secrets/registry.axgrid.com.yaml
 
 bootstrap:
   - docker_install: {}
   - service: { name: docker, state: started, enabled: true }
 
 deploy:
-  # Builds locally on the CLI host. With push=true the image is pushed to the
-  # registry; with push=false it's loaded into the local docker daemon only
-  # (useful for smoke tests without a registry).
-  - name: build echoapp
+  # Authenticate to the registry. By default this runs both locally (so
+  # docker_build --push works) and on the remote (so docker_compose pull works
+  # for the private image). Real creds live in the gitignored secrets/ dir.
+  - name: registry login
+    docker_login:
+      registry: registry.axgrid.com
+      creds_file: secrets/registry.axgrid.com.yaml
+
+  - name: build & push echoapp
     docker_build:
       context: .
       tag: "{{ .image }}:{{ .git_short_sha }}"
       platform: linux/amd64
-      push: false
+      push: true
       build_args:
         VERSION: "{{ .git_short_sha }}"
 

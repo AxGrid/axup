@@ -18,6 +18,13 @@ func runDockerInstallTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return protocol.Event{Status: protocol.StatusSkipped, Message: "docker already installed"}
 	}
 
+	if ctx.dryRun {
+		return protocol.Event{
+			Status:  protocol.StatusWouldChange,
+			Message: "would run: curl -fsSL https://get.docker.com | sh",
+		}
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("/bin/sh", "-c", "curl -fsSL https://get.docker.com | sh")
 	cmd.Stdout = &stdout

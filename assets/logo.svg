@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240" role="img" aria-label="deploy">
+  <title>deploy</title>
+
+  <!-- terminal-ish dark rounded square -->
+  <rect width="240" height="240" rx="32" fill="#0d1117"/>
+
+  <!-- subtle frame -->
+  <rect x="6" y="6" width="228" height="228" rx="28" fill="none" stroke="#21262d" stroke-width="1"/>
+
+  <!-- chevron prompt > rendered as a thick stroke -->
+  <path d="M 60 78 L 102 120 L 60 162"
+        fill="none" stroke="#3fb950" stroke-width="12"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- task progress bars: green / yellow / cyan echoing the CLI's status colors -->
+  <rect x="120" y="96"  width="78" height="10" rx="5" fill="#3fb950"/>
+  <rect x="120" y="116" width="62" height="10" rx="5" fill="#d29922"/>
+  <rect x="120" y="136" width="44" height="10" rx="5" fill="#39c5cf"/>
+</svg>

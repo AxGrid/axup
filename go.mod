@@ -3,15 +3,19 @@ module github.com/axgrid/deploy
 go 1.25.0
 
 require (
+	filippo.io/age v1.3.1
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.51.0
+	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
 	dario.cat/mergo v1.0.1 // indirect
+	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver/v3 v3.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

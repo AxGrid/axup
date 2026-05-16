@@ -20,82 +20,101 @@ func runServiceTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	}
 	switch provider {
 	case "systemd":
-		return runSystemdService(t.ServiceName, state, t.ServiceEnabled)
+		return runSystemdService(ctx, t.ServiceName, state, t.ServiceEnabled)
 	case "supervisor":
-		return runSupervisorService(t.ServiceName, state)
+		return runSupervisorService(ctx, t.ServiceName, state)
 	default:
 		return protocol.Event{Status: protocol.StatusError, Message: "unknown service provider: " + provider}
 	}
 }
 
-func runSystemdService(name, state string, enabled *bool) protocol.Event {
-	var stdout, stderr bytes.Buffer
-	changed := false
-	notes := []string{}
+// sysOp is one decision the service handler made for the current state. A
+// non-empty verb means "needs systemctl <verb>"; empty verb is a no-op note
+// describing why nothing was done.
+type sysOp struct {
+	verb string
+	done string // past-tense note used both for real apply and dry-run preview
+}
 
-	active, _ := systemctlIs("is-active", name)
-	enabledNow, _ := systemctlIs("is-enabled", name)
-
+func decideSystemd(active, enabledNow, state string, enabled *bool) []sysOp {
+	var ops []sysOp
 	switch state {
 	case "started":
 		if active != "active" {
-			if err := runCapture("systemctl", []string{"start", name}, &stdout, &stderr); err != nil {
-				return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "systemctl start: " + err.Error()}
-			}
-			changed = true
-			notes = append(notes, "started")
+			ops = append(ops, sysOp{verb: "start", done: "started"})
 		} else {
-			notes = append(notes, "already active")
+			ops = append(ops, sysOp{done: "already active"})
 		}
 	case "stopped":
 		if active == "active" {
-			if err := runCapture("systemctl", []string{"stop", name}, &stdout, &stderr); err != nil {
-				return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "systemctl stop: " + err.Error()}
-			}
-			changed = true
-			notes = append(notes, "stopped")
+			ops = append(ops, sysOp{verb: "stop", done: "stopped"})
 		} else {
-			notes = append(notes, "already inactive")
+			ops = append(ops, sysOp{done: "already inactive"})
 		}
 	case "restarted":
-		if err := runCapture("systemctl", []string{"restart", name}, &stdout, &stderr); err != nil {
-			return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "systemctl restart: " + err.Error()}
-		}
-		changed = true
-		notes = append(notes, "restarted")
+		ops = append(ops, sysOp{verb: "restart", done: "restarted"})
 	case "reloaded":
-		if err := runCapture("systemctl", []string{"reload", name}, &stdout, &stderr); err != nil {
-			return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "systemctl reload: " + err.Error()}
-		}
-		changed = true
-		notes = append(notes, "reloaded")
+		ops = append(ops, sysOp{verb: "reload", done: "reloaded"})
 	}
-
 	if enabled != nil {
 		switch {
 		case *enabled && enabledNow != "enabled":
-			if err := runCapture("systemctl", []string{"enable", name}, &stdout, &stderr); err != nil {
-				return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "systemctl enable: " + err.Error()}
-			}
-			changed = true
-			notes = append(notes, "enabled")
+			ops = append(ops, sysOp{verb: "enable", done: "enabled"})
 		case !*enabled && enabledNow == "enabled":
-			if err := runCapture("systemctl", []string{"disable", name}, &stdout, &stderr); err != nil {
-				return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "systemctl disable: " + err.Error()}
-			}
-			changed = true
-			notes = append(notes, "disabled")
+			ops = append(ops, sysOp{verb: "disable", done: "disabled"})
 		}
 	}
+	return ops
+}
 
-	status := protocol.StatusSkipped
-	if changed {
-		status = protocol.StatusChanged
+func runSystemdService(ctx *runCtx, name, state string, enabled *bool) protocol.Event {
+	active, _ := systemctlIs("is-active", name)
+	enabledNow, _ := systemctlIs("is-enabled", name)
+	ops := decideSystemd(active, enabledNow, state, enabled)
+
+	needsChange := false
+	for _, op := range ops {
+		if op.verb != "" {
+			needsChange = true
+			break
+		}
+	}
+	if !needsChange {
+		notes := make([]string, 0, len(ops))
+		for _, op := range ops {
+			notes = append(notes, op.done)
+		}
+		return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": " + strings.Join(notes, ", ")}
+	}
+	if ctx.dryRun {
+		notes := make([]string, 0, len(ops))
+		for _, op := range ops {
+			if op.verb != "" {
+				notes = append(notes, "would "+op.done)
+			} else {
+				notes = append(notes, op.done)
+			}
+		}
+		return protocol.Event{Status: protocol.StatusWouldChange, Message: name + ": " + strings.Join(notes, ", ")}
+	}
+
+	var stdout, stderr bytes.Buffer
+	notes := make([]string, 0, len(ops))
+	for _, op := range ops {
+		if op.verb == "" {
+			notes = append(notes, op.done)
+			continue
+		}
+		if err := runCapture("systemctl", []string{op.verb, name}, &stdout, &stderr); err != nil {
+			return protocol.Event{
+				Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(),
+				Message: fmt.Sprintf("systemctl %s %s: %v", op.verb, name, err),
+			}
+		}
+		notes = append(notes, op.done)
 	}
 	return protocol.Event{
-		Status:  status,
-		Stdout:  stdout.String(),
-		Stderr:  stderr.String(),
+		Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(),
 		Message: name + ": " + strings.Join(notes, ", "),
 	}
 }
@@ -112,44 +131,51 @@ func systemctlIs(verb, name string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
-func runSupervisorService(name, state string) protocol.Event {
-	var stdout, stderr bytes.Buffer
-
+func runSupervisorService(ctx *runCtx, name, state string) protocol.Event {
+	// Decide
+	var verb string
 	switch state {
 	case "started":
 		st, _ := supervisorState(name)
 		if st == "RUNNING" {
 			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": already RUNNING"}
 		}
-		if err := runCapture("supervisorctl", []string{"start", name}, &stdout, &stderr); err != nil {
-			return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl start: " + err.Error()}
-		}
-		return protocol.Event{Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(), Message: name + ": started"}
-
+		verb = "start"
 	case "stopped":
 		st, _ := supervisorState(name)
 		if st == "STOPPED" || st == "EXITED" || st == "FATAL" {
 			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": already " + st}
 		}
-		if err := runCapture("supervisorctl", []string{"stop", name}, &stdout, &stderr); err != nil {
-			return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl stop: " + err.Error()}
-		}
-		return protocol.Event{Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(), Message: name + ": stopped"}
-
+		verb = "stop"
 	case "restarted":
-		if err := runCapture("supervisorctl", []string{"restart", name}, &stdout, &stderr); err != nil {
-			return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl restart: " + err.Error()}
-		}
-		return protocol.Event{Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(), Message: name + ": restarted"}
-
+		verb = "restart"
 	case "reloaded":
 		// supervisor's idiom: `update` rereads config files and starts/stops as needed.
-		if err := runCapture("supervisorctl", []string{"update"}, &stdout, &stderr); err != nil {
-			return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl update: " + err.Error()}
-		}
-		return protocol.Event{Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl update"}
+		verb = "update"
+	default:
+		return protocol.Event{Status: protocol.StatusError, Message: "unknown service state: " + state}
 	}
-	return protocol.Event{Status: protocol.StatusError, Message: "unknown service state: " + state}
+
+	if ctx.dryRun {
+		if verb == "update" {
+			return protocol.Event{Status: protocol.StatusWouldChange, Message: "would run: supervisorctl update"}
+		}
+		return protocol.Event{Status: protocol.StatusWouldChange, Message: fmt.Sprintf("would run: supervisorctl %s %s", verb, name)}
+	}
+
+	var stdout, stderr bytes.Buffer
+	args := []string{verb}
+	if verb != "update" {
+		args = append(args, name)
+	}
+	if err := runCapture("supervisorctl", args, &stdout, &stderr); err != nil {
+		return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl " + verb + ": " + err.Error()}
+	}
+	msg := name + ": " + verb
+	if verb == "update" {
+		msg = "supervisorctl update"
+	}
+	return protocol.Event{Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(), Message: msg}
 }
 
 // supervisorState parses `supervisorctl status <name>` output. Returns the

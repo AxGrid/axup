@@ -11,7 +11,22 @@ import (
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
-func Load(path string) (*Rulebook, error) {
+// LoadOptions is variadic — most callers pass none. HostVars is merged into
+// rb.Vars (overriding rulebook defaults) before deps/expand/render run, so the
+// resulting Rulebook is host-specific.
+type LoadOptions struct {
+	HostVars map[string]any
+}
+
+func Load(path string, opts ...LoadOptions) (*Rulebook, error) {
+	var o LoadOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	return loadInternal(path, o)
+}
+
+func loadInternal(path string, o LoadOptions) (*Rulebook, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read rulebook %s: %w", path, err)
@@ -43,6 +58,31 @@ func Load(path string) (*Rulebook, error) {
 			rb.Vars[k] = v
 		}
 	}
+	// Apply per-host vars last so they override the rulebook's defaults and
+	// any auto-vars. This is what makes inventory-driven multi-host work:
+	// each host's Load() produces a Rulebook tailored to that host's view.
+	for k, v := range o.HostVars {
+		rb.Vars[k] = v
+	}
+
+	// Resolve deps and inline every `use:` task before we run downstream
+	// validation. From here on the task tree is fully concrete — no further
+	// modules will be loaded.
+	if len(rb.Deps) > 0 {
+		depPaths, err := resolveDepsForLoad(&rb)
+		if err != nil {
+			return nil, err
+		}
+		visited := map[string]bool{}
+		rb.Bootstrap, err = expandUseTasks(rb.Bootstrap, depPaths, rb.Vars, visited)
+		if err != nil {
+			return nil, err
+		}
+		rb.Deploy, err = expandUseTasks(rb.Deploy, depPaths, rb.Vars, visited)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	if err := validateTasks("bootstrap", rb.Bootstrap); err != nil {
 		return nil, err
@@ -54,6 +94,43 @@ func Load(path string) (*Rulebook, error) {
 		return nil, err
 	}
 	return &rb, nil
+}
+
+// resolveDepsForLoad reconciles the rulebook's deps[] against deploy.lock,
+// clones any missing repos to the cache, and returns dep_name → local_path.
+// If reconciliation discovered a missing/new dep, the lock is written back so
+// the next run is fully reproducible.
+func resolveDepsForLoad(rb *Rulebook) (map[string]string, error) {
+	lock, err := LoadLock(rb.Dir)
+	if err != nil {
+		return nil, err
+	}
+	resolved, changed, newLock, err := Reconcile(rb.Deps, lock)
+	if err != nil {
+		return nil, err
+	}
+	cacheDir, err := CacheDir()
+	if err != nil {
+		return nil, err
+	}
+	paths := map[string]string{}
+	for _, d := range rb.Deps {
+		sha, ok := resolved[d.Name]
+		if !ok {
+			return nil, fmt.Errorf("dep %q did not resolve", d.Name)
+		}
+		local, err := EnsureClone(d.NormalizedURL(), sha, cacheDir)
+		if err != nil {
+			return nil, fmt.Errorf("clone dep %q: %w", d.Name, err)
+		}
+		paths[d.Name] = local
+	}
+	if changed {
+		if err := SaveLock(rb.Dir, newLock); err != nil {
+			return nil, fmt.Errorf("write %s: %w", LockFileName, err)
+		}
+	}
+	return paths, nil
 }
 
 func validateTasks(phase string, tasks []Task) error {
@@ -86,8 +163,13 @@ func validateTasks(phase string, tasks []Task) error {
 		if t.DockerLogin != nil {
 			set++
 		}
+		if t.Use != "" {
+			// `use:` must not survive past Load — if we see it here, expansion
+			// failed or wasn't run (e.g. no deps: declared).
+			return fmt.Errorf("%s[%d] (%q): use %q did not resolve — declare the dep in deps:[]", phase, i, t.Name, t.Use)
+		}
 		if set == 0 {
-			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/apt/service/docker_compose/docker_install/docker_build/docker_login", phase, i, t.Name)
+			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
 		}
 		if set > 1 {
 			return fmt.Errorf("%s[%d] (%q): multiple operations set; choose exactly one", phase, i, t.Name)
@@ -149,24 +231,33 @@ func validateTasks(phase string, tasks []Task) error {
 			if t.DockerLogin.Registry == "" {
 				return fmt.Errorf("%s[%d] (%q): docker_login requires registry", phase, i, t.Name)
 			}
-			if t.DockerLogin.Username == "" {
-				return fmt.Errorf("%s[%d] (%q): docker_login requires username", phase, i, t.Name)
-			}
-			srcs := 0
-			if t.DockerLogin.Password != "" {
-				srcs++
-			}
-			if t.DockerLogin.PasswordFile != "" {
-				srcs++
-			}
-			if t.DockerLogin.PasswordEnv != "" {
-				srcs++
-			}
-			if srcs == 0 {
-				return fmt.Errorf("%s[%d] (%q): docker_login requires password / password_file / password_env", phase, i, t.Name)
-			}
-			if srcs > 1 {
-				return fmt.Errorf("%s[%d] (%q): docker_login: choose exactly one of password / password_file / password_env", phase, i, t.Name)
+			if t.DockerLogin.CredsFile != "" {
+				// creds_file is self-contained; reject the inline fields so the
+				// rulebook can't have two competing sources of truth.
+				if t.DockerLogin.Username != "" || t.DockerLogin.Password != "" ||
+					t.DockerLogin.PasswordFile != "" || t.DockerLogin.PasswordEnv != "" {
+					return fmt.Errorf("%s[%d] (%q): docker_login: when creds_file is set, do not also set username/password/password_file/password_env", phase, i, t.Name)
+				}
+			} else {
+				if t.DockerLogin.Username == "" {
+					return fmt.Errorf("%s[%d] (%q): docker_login requires creds_file or username", phase, i, t.Name)
+				}
+				srcs := 0
+				if t.DockerLogin.Password != "" {
+					srcs++
+				}
+				if t.DockerLogin.PasswordFile != "" {
+					srcs++
+				}
+				if t.DockerLogin.PasswordEnv != "" {
+					srcs++
+				}
+				if srcs == 0 {
+					return fmt.Errorf("%s[%d] (%q): docker_login requires creds_file, or password / password_file / password_env", phase, i, t.Name)
+				}
+				if srcs > 1 {
+					return fmt.Errorf("%s[%d] (%q): docker_login: choose exactly one of password / password_file / password_env", phase, i, t.Name)
+				}
 			}
 			switch t.DockerLogin.Location {
 			case "", "both", "local", "remote":

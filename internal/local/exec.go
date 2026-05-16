@@ -10,19 +10,21 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/axgrid/deploy/internal/protocol"
 )
 
 // Execute runs a CLI-local task. Output streams to os.Stdout/Stderr so the
-// user sees buildx progress live; the returned Event is a summary.
-func Execute(t protocol.Task) protocol.Event {
+// user sees buildx progress live; the returned Event is a summary. In dry-run
+// mode handlers report would_change without invoking docker.
+func Execute(t protocol.Task, dryRun bool) protocol.Event {
 	switch t.Type {
 	case protocol.TaskDockerBuild:
-		return runDockerBuild(t)
+		return runDockerBuild(t, dryRun)
 	case protocol.TaskDockerLogin:
-		return runLocalDockerLogin(t)
+		return runLocalDockerLogin(t, dryRun)
 	default:
 		return protocol.Event{
 			Status:  protocol.StatusError,
@@ -31,13 +33,18 @@ func Execute(t protocol.Task) protocol.Event {
 	}
 }
 
-func runDockerBuild(t protocol.Task) protocol.Event {
+func runDockerBuild(t protocol.Task, dryRun bool) protocol.Event {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return protocol.Event{Status: protocol.StatusError, Message: "docker not on PATH"}
 	}
 	dockerfile := t.BuildDockerfile
 	if dockerfile == "" {
 		dockerfile = "Dockerfile"
+	}
+	// Resolve the Dockerfile path relative to the build context so the command
+	// works regardless of the CLI's cwd.
+	if !filepath.IsAbs(dockerfile) {
+		dockerfile = filepath.Join(t.BuildContext, dockerfile)
 	}
 	platform := t.BuildPlatform
 	if platform == "" {
@@ -60,6 +67,13 @@ func runDockerBuild(t protocol.Task) protocol.Event {
 		args = append(args, "--load")
 	}
 	args = append(args, t.BuildContext)
+
+	if dryRun {
+		return protocol.Event{
+			Status:  protocol.StatusWouldChange,
+			Message: "would run: docker " + strings.Join(args, " "),
+		}
+	}
 
 	cmd := exec.Command("docker", args...)
 	// Stream live so users see real progress, but also capture a tail for the
@@ -85,7 +99,13 @@ func runDockerBuild(t protocol.Task) protocol.Event {
 	}
 }
 
-func runLocalDockerLogin(t protocol.Task) protocol.Event {
+func runLocalDockerLogin(t protocol.Task, dryRun bool) protocol.Event {
+	if dryRun {
+		return protocol.Event{
+			Status:  protocol.StatusWouldChange,
+			Message: "would docker login to " + t.LoginRegistry + " as " + t.LoginUsername,
+		}
+	}
 	cmd := exec.Command("docker", "login", "-u", t.LoginUsername, "--password-stdin", t.LoginRegistry)
 	cmd.Stdin = strings.NewReader(t.LoginPassword)
 	var stdout, stderr bytes.Buffer

@@ -29,7 +29,17 @@ func Run(in io.Reader, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
-	ctx := newRunCtx(state)
+	ctx := newRunCtx(state, plan.DryRun)
+
+	// Status-only requests bypass task execution entirely. The agent reads
+	// state.json, walks every recorded file, and emits a synthetic task_end
+	// per file describing in_sync / drift / missing. No state.save() either —
+	// status is read-only.
+	if plan.StatusOnly {
+		emitStatus(w, state)
+		w.write(protocol.Event{Type: protocol.EventDone})
+		return nil
+	}
 
 	for _, task := range plan.Tasks {
 		w.write(protocol.Event{
@@ -43,12 +53,16 @@ func Run(in io.Reader, out io.Writer) error {
 		w.write(ev)
 	}
 
-	if err := state.save(); err != nil {
-		w.write(protocol.Event{
-			Type:    protocol.EventLog,
-			Status:  protocol.StatusError,
-			Message: "save state: " + err.Error(),
-		})
+	// In dry-run we keep state on disk exactly as it was — nothing actually
+	// got applied this run.
+	if !ctx.dryRun {
+		if err := state.save(); err != nil {
+			w.write(protocol.Event{
+				Type:    protocol.EventLog,
+				Status:  protocol.StatusError,
+				Message: "save state: " + err.Error(),
+			})
+		}
 	}
 
 	w.write(protocol.Event{Type: protocol.EventDone})

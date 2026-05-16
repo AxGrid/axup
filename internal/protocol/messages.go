@@ -16,10 +16,14 @@ const (
 	EventLog       = "log"
 	EventDone      = "done"
 
-	StatusOK      = "ok"
-	StatusChanged = "changed"
-	StatusSkipped = "skipped"
-	StatusError   = "error"
+	StatusOK          = "ok"
+	StatusChanged     = "changed"
+	StatusSkipped     = "skipped"
+	StatusError       = "error"
+	StatusWouldChange = "would_change" // emitted in dry-run when a task would have applied a change
+	StatusInSync      = "in_sync"      // status mode: file on disk matches state.json
+	StatusDrift       = "drift"        // status mode: file exists but content/mode differs from state
+	StatusMissing     = "missing"      // status mode: state.json knows the file but it's gone from disk
 
 	TaskCommand       = "command"
 	TaskCopy          = "copy"
@@ -35,6 +39,8 @@ const (
 type Plan struct {
 	RulebookName string `json:"rulebook_name"`
 	Phase        string `json:"phase"`
+	DryRun       bool   `json:"dry_run,omitempty"`     // when true, handlers preview without applying
+	StatusOnly   bool   `json:"status_only,omitempty"` // when true, agent reports state.json drift instead of running tasks
 	Tasks        []Task `json:"tasks"`
 }
 

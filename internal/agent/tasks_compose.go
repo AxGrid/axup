@@ -18,6 +18,28 @@ func runDockerComposeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		state = "up"
 	}
 
+	var action []string
+	switch state {
+	case "up":
+		action = []string{"up", "-d", "--remove-orphans"}
+	case "down":
+		action = []string{"down"}
+	case "restarted":
+		action = []string{"restart"}
+	case "pulled":
+		action = []string{"pull"}
+	default:
+		return protocol.Event{Status: protocol.StatusError, Message: "unknown compose state: " + state}
+	}
+
+	if ctx.dryRun {
+		preview := "would run: docker compose " + action[0]
+		if t.ComposePull && (state == "up" || state == "restarted") {
+			preview = "would run: docker compose pull && docker compose " + action[0]
+		}
+		return protocol.Event{Status: protocol.StatusWouldChange, Path: t.ComposeDir, Message: preview}
+	}
+
 	var allStdout, allStderr bytes.Buffer
 
 	run := func(args ...string) error {
@@ -37,20 +59,6 @@ func runDockerComposeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 				Message: "docker compose pull: " + err.Error(),
 			}
 		}
-	}
-
-	var action []string
-	switch state {
-	case "up":
-		action = []string{"up", "-d", "--remove-orphans"}
-	case "down":
-		action = []string{"down"}
-	case "restarted":
-		action = []string{"restart"}
-	case "pulled":
-		action = []string{"pull"}
-	default:
-		return protocol.Event{Status: protocol.StatusError, Message: "unknown compose state: " + state}
 	}
 
 	if err := run(action...); err != nil {

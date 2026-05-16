@@ -1,0 +1,6 @@
+# deploy.lock — managed by `deploy deps tidy`. Do not edit by hand.
+deps:
+    - name: common
+      git: file:///tmp/deploy-common-test
+      version: v1.0.1
+      sha: 86746bffb636f64302f4f9b67f933d1845f4944b

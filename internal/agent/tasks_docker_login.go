@@ -10,6 +10,12 @@ import (
 )
 
 func runDockerLoginTask(ctx *runCtx, t protocol.Task) protocol.Event {
+	if ctx.dryRun {
+		return protocol.Event{
+			Status:  protocol.StatusWouldChange,
+			Message: "would docker login to " + t.LoginRegistry + " as " + t.LoginUsername,
+		}
+	}
 	cmd := exec.Command("docker", "login", "-u", t.LoginUsername, "--password-stdin", t.LoginRegistry)
 	cmd.Stdin = strings.NewReader(t.LoginPassword)
 	var stdout, stderr bytes.Buffer

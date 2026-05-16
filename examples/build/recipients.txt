@@ -1,0 +1,7 @@
+# Public keys allowed to decrypt secrets/*.yaml in this project.
+# Add one per line; lines starting with `#` are comments.
+# Format: age1… (native age public key) or ssh-… (SSH public key)
+
+age10qd5pvuuvtpqv79rr4qgy87x7x3zgfkphcd5hkcalpkh8pfcvsms8aycgg
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDEalcH3CGCLU+8OaHtXJemA9GRX6Q6Jwxc0B6kMtqvwaRhX/phGG/IEx2JvtdWxPPvucO2vuKzjWCTzdTI6nZdnCX6s42meZE3f2xJenYSCH4sq/LVGW8xnxhxKa7s6yhQsM9zFLmfx/BrCwaBir0OSJ1KKex1jh5zf9DYuzeOhWJ0Fr5YmGhblLvRq9XsE9fYiQj6+KhnSsnwzs7kitTebQIWyKslMvnYE3Hzh7QsyxY+qZWTcp+LomWUy7Wg0P4GbW27oTLP3+JnbSxuXw7dmwcVNM0gCeoxQvzDlOCE1MAY2tFK4sA2PWJLT/7wlcZk1WdZfAkY+ijDWy7EATMh zed@dmitry-linux
+age17drqlr6cmhzjyjxjy3qdk2lrqn6yzu4dxejx7y96ujk00rujk4jszkrp3x

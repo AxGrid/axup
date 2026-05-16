@@ -1,0 +1,25 @@
+name: deps-demo
+
+# Pull common-rules from an external git repository. In real life this is a
+# github.com URL; here we point at a local file:// repo for the smoke test.
+deps:
+  - name: common
+    git: "file:///tmp/deploy-common-test"
+    version: v1.0.1
+
+vars:
+  greeting: "hello from the parent rulebook"
+
+bootstrap:
+  # Inline the common/echo module. vars: override the module's defaults.
+  - use: common/echo
+    vars:
+      greeting: "{{ .greeting }} (overridden via use.vars)"
+      target_path: /opt/deps-demo-from-module.txt
+
+  # Same module used again with a different target — proves modules are
+  # reusable within a single rulebook.
+  - use: common/echo
+    vars:
+      greeting: "second copy"
+      target_path: /opt/deps-demo-second.txt

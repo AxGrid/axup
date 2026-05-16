@@ -1,0 +1,18 @@
+hosts:
+  prod-1:
+    address: cert2.axgrid.com
+    user: root
+    vars:
+      env: prod
+      node: alpha
+      target: /opt/multihost-prod.txt
+  stage-1:
+    address: cert2.axgrid.com
+    user: root
+    vars:
+      env: stage
+      node: beta
+      target: /opt/multihost-stage.txt
+
+groups:
+  all: [prod-1, stage-1]
