@@ -1,0 +1,200 @@
+package rulebook
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"text/template"
+
+	"github.com/Masterminds/sprig/v3"
+)
+
+// renderString templates a single string field with the rulebook's vars. We
+// skip rendering if the field has no `{{` to keep static paths fast and avoid
+// surprising errors on plain shell snippets.
+func renderString(s string, vars map[string]any) (string, error) {
+	if !strings.Contains(s, "{{") {
+		return s, nil
+	}
+	tmpl, err := template.New("inline").
+		Option("missingkey=error").
+		Funcs(sprig.FuncMap()).
+		Parse(s)
+	if err != nil {
+		return "", fmt.Errorf("parse inline template %q: %w", s, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, vars); err != nil {
+		return "", fmt.Errorf("execute inline template %q: %w", s, err)
+	}
+	return buf.String(), nil
+}
+
+// expandStringFields walks Bootstrap and Deploy tasks and replaces template
+// expressions in command strings, file paths, and when_changed entries. File
+// bodies (copy src, template src) are handled by RenderTemplate / ReadFile at
+// task-build time.
+func (rb *Rulebook) expandStringFields() error {
+	for i := range rb.Bootstrap {
+		if err := expandTaskStrings(&rb.Bootstrap[i], rb.Vars); err != nil {
+			return fmt.Errorf("bootstrap[%d]: %w", i, err)
+		}
+	}
+	for i := range rb.Deploy {
+		if err := expandTaskStrings(&rb.Deploy[i], rb.Vars); err != nil {
+			return fmt.Errorf("deploy[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func expandTaskStrings(t *Task, vars map[string]any) error {
+	if t.Command != "" {
+		s, err := renderString(t.Command, vars)
+		if err != nil {
+			return err
+		}
+		t.Command = s
+	}
+	if t.Copy != nil {
+		s, err := renderString(t.Copy.Dst, vars)
+		if err != nil {
+			return err
+		}
+		t.Copy.Dst = s
+	}
+	if t.Template != nil {
+		s, err := renderString(t.Template.Dst, vars)
+		if err != nil {
+			return err
+		}
+		t.Template.Dst = s
+	}
+	if t.Apt != nil {
+		for i, n := range t.Apt.Name {
+			s, err := renderString(n, vars)
+			if err != nil {
+				return err
+			}
+			t.Apt.Name[i] = s
+		}
+	}
+	if t.Service != nil {
+		s, err := renderString(t.Service.Name, vars)
+		if err != nil {
+			return err
+		}
+		t.Service.Name = s
+	}
+	if t.DockerCompose != nil {
+		s, err := renderString(t.DockerCompose.Dir, vars)
+		if err != nil {
+			return err
+		}
+		t.DockerCompose.Dir = s
+	}
+	if t.DockerBuild != nil {
+		if t.DockerBuild.Tag != "" {
+			s, err := renderString(t.DockerBuild.Tag, vars)
+			if err != nil {
+				return err
+			}
+			t.DockerBuild.Tag = s
+		}
+		for i, tag := range t.DockerBuild.Tags {
+			s, err := renderString(tag, vars)
+			if err != nil {
+				return err
+			}
+			t.DockerBuild.Tags[i] = s
+		}
+		if t.DockerBuild.Context != "" {
+			s, err := renderString(t.DockerBuild.Context, vars)
+			if err != nil {
+				return err
+			}
+			t.DockerBuild.Context = s
+		}
+		for k, v := range t.DockerBuild.BuildArgs {
+			s, err := renderString(v, vars)
+			if err != nil {
+				return err
+			}
+			t.DockerBuild.BuildArgs[k] = s
+		}
+	}
+	if t.DockerLogin != nil {
+		if s, err := renderString(t.DockerLogin.Registry, vars); err == nil {
+			t.DockerLogin.Registry = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.DockerLogin.Username, vars); err == nil {
+			t.DockerLogin.Username = s
+		} else {
+			return err
+		}
+	}
+	for i, p := range t.WhenChanged {
+		s, err := renderString(p, vars)
+		if err != nil {
+			return err
+		}
+		t.WhenChanged[i] = s
+	}
+	return nil
+}
+
+// RenderTemplate reads src (relative to rb.Dir if not absolute), parses it as a
+// Go text/template with sprig functions, executes it with `vars`, and returns
+// the rendered bytes. Vars are merged from the rulebook's top-level vars and
+// any caller-supplied overrides.
+func (rb *Rulebook) RenderTemplate(src string, vars map[string]any) ([]byte, error) {
+	path := src
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rb.Dir, src)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read template %s: %w", src, err)
+	}
+	tmpl, err := template.New(filepath.Base(src)).
+		Option("missingkey=error").
+		Funcs(sprig.FuncMap()).
+		Parse(string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", src, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, vars); err != nil {
+		return nil, fmt.Errorf("execute template %s: %w", src, err)
+	}
+	return buf.Bytes(), nil
+}
+
+// ReadFile reads a non-template file (for `copy` tasks) relative to rb.Dir.
+func (rb *Rulebook) ReadFile(src string) ([]byte, error) {
+	path := src
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(rb.Dir, src)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file %s: %w", src, err)
+	}
+	return data, nil
+}
+
+// MergeVars combines a base map with overrides. Overrides win.
+func MergeVars(base, over map[string]any) map[string]any {
+	out := make(map[string]any, len(base)+len(over))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range over {
+		out[k] = v
+	}
+	return out
+}

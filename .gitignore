@@ -1,0 +1,6 @@
+/bin/
+/internal/agentbin/bin/deployd-*
+secrets/
+*.local.yaml
+.idea/
+.vscode/

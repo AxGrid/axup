@@ -1,0 +1,38 @@
+name: echoapp
+
+vars:
+  app_name: echoapp
+  app_port: 8081
+  image: registry.example.com/echoapp   # override before push
+  # git_sha / git_short_sha / git_branch / git_dirty are injected automatically
+
+bootstrap:
+  - docker_install: {}
+  - service: { name: docker, state: started, enabled: true }
+
+deploy:
+  # Builds locally on the CLI host. With push=true the image is pushed to the
+  # registry; with push=false it's loaded into the local docker daemon only
+  # (useful for smoke tests without a registry).
+  - name: build echoapp
+    docker_build:
+      context: .
+      tag: "{{ .image }}:{{ .git_short_sha }}"
+      platform: linux/amd64
+      push: false
+      build_args:
+        VERSION: "{{ .git_short_sha }}"
+
+  - name: app directory
+    command: "mkdir -p /opt/{{ .app_name }}"
+
+  - name: render compose
+    template:
+      src: templates/compose.yml.tmpl
+      dst: "/opt/{{ .app_name }}/docker-compose.yml"
+
+  - name: bring up echoapp
+    docker_compose:
+      dir: "/opt/{{ .app_name }}"
+      state: up
+      pull: true

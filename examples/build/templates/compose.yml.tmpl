@@ -1,0 +1,9 @@
+services:
+  echoapp:
+    image: {{ .image }}:{{ .git_short_sha }}
+    container_name: echoapp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:{{ .app_port }}:8080"
+    environment:
+      PORT: "8080"

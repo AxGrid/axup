@@ -1,0 +1,7 @@
+[program:{{ .app_name }}]
+command=/bin/sh -c 'while true; do echo "[{{ .app_name }}] tick $(date -Is)" >> /var/log/{{ .app_name }}.log; sleep 5; done'
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/{{ .app_name }}.err.log
+stdout_logfile=/var/log/{{ .app_name }}.out.log
+user=root

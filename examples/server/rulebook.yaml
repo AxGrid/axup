@@ -1,0 +1,61 @@
+name: deploy-demo
+
+vars:
+  app_name: echoapp
+  redis_port: 6379
+
+bootstrap:
+  - name: install prereqs (apt)
+    apt:
+      name: [curl, ca-certificates, supervisor]
+      update_cache: true
+
+  - name: install docker via get.docker.com
+    docker_install: {}
+
+  - name: ensure docker daemon up + enabled
+    service:
+      name: docker
+      state: started
+      enabled: true
+
+  - name: ensure supervisor up + enabled
+    service:
+      name: supervisor
+      state: started
+      enabled: true
+
+  - name: redis compose dir
+    command: "mkdir -p /opt/{{ .app_name }}-redis"
+
+  - name: redis compose file
+    template:
+      src: templates/redis-compose.yml.tmpl
+      dst: "/opt/{{ .app_name }}-redis/docker-compose.yml"
+      mode: "0644"
+
+  - name: bring up redis compose
+    docker_compose:
+      dir: "/opt/{{ .app_name }}-redis"
+      state: up
+      pull: true
+
+  - name: render echoapp supervisor conf
+    template:
+      src: templates/echoapp.supervisor.conf.tmpl
+      dst: "/etc/supervisor/conf.d/{{ .app_name }}.conf"
+      mode: "0644"
+
+  - name: supervisor reread config
+    service:
+      name: "{{ .app_name }}"
+      state: reloaded
+      provider: supervisor
+    when_changed:
+      - "/etc/supervisor/conf.d/{{ .app_name }}.conf"
+
+  - name: ensure echoapp running
+    service:
+      name: "{{ .app_name }}"
+      state: started
+      provider: supervisor

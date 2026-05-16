@@ -1,0 +1,12 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: {{ .app_name }}-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:{{ .redis_port }}:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

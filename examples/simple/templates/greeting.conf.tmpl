@@ -1,0 +1,8 @@
+# rendered by deploy at {{ now | date "2006-01-02" }}
+app_name = {{ .app_name | quote }}
+greeting = {{ .greeting | quote }}
+mysql_port = {{ .mysql_port | default 3306 }}
+hosts:
+{{- range .hosts }}
+  - {{ . }}
+{{- end }}
