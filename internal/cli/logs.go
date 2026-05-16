@@ -21,13 +21,14 @@ import (
 )
 
 var (
-	logsHost     string
-	logsGroup    string
-	logsRulebook string
-	logsVarsFile string
-	logsLines    int
-	logsNoFollow bool
-	logsList     bool
+	logsHost      string
+	logsGroup     string
+	logsRulebook  string
+	logsInventory string
+	logsVarsFile  string
+	logsLines     int
+	logsNoFollow  bool
+	logsList      bool
 )
 
 var logsCmd = &cobra.Command{
@@ -62,7 +63,12 @@ Examples:
 		if err != nil {
 			return err
 		}
-		inv, err := inventory.LoadDir(rb.Dir)
+		var inv *inventory.Inventory
+		if logsInventory != "" {
+			inv, err = inventory.LoadPath(logsInventory)
+		} else {
+			inv, err = inventory.LoadDir(rb.Dir)
+		}
 		if err != nil {
 			return err
 		}
@@ -195,6 +201,7 @@ func init() {
 	logsCmd.Flags().StringVar(&logsHost, "host", "", "Target host (user@addr[:port]) or inventory host name")
 	logsCmd.Flags().StringVar(&logsGroup, "group", "", "Inventory group name (mutex with --host)")
 	logsCmd.Flags().StringVar(&logsRulebook, "rulebook", "rulebook.yaml", "Path to rulebook.yaml")
+	logsCmd.Flags().StringVar(&logsInventory, "inventory", "", "Optional inventory YAML (overrides default inventory.yaml next to rulebook; may be age-encrypted)")
 	logsCmd.Flags().StringVar(&logsVarsFile, "vars", "", "Optional YAML file with vars (templated through service log paths)")
 	logsCmd.Flags().IntVarP(&logsLines, "tail", "n", 20, "Initial lines from the end of each log file")
 	logsCmd.Flags().BoolVar(&logsNoFollow, "no-follow", false, "Don't stream new lines; print the snapshot and exit")

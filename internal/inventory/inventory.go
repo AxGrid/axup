@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/axgrid/axup/internal/secrets"
 )
 
 const DefaultFileName = "inventory.yaml"
@@ -41,21 +43,39 @@ type Resolved struct {
 }
 
 // LoadDir tries to load inventory.yaml from `dir`. Returns (nil, nil) when the
-// file is absent — inventory is optional.
+// file is absent — inventory is optional. For an explicit per-env file pass
+// the path to LoadPath instead.
 func LoadDir(dir string) (*Inventory, error) {
 	p := filepath.Join(dir, DefaultFileName)
-	data, err := os.ReadFile(p)
+	inv, err := LoadPath(p)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
+	return inv, err
+}
+
+// LoadPath reads an inventory YAML from an explicit path. The file may be
+// age-encrypted (text-armor); decryption uses the same identity discovery as
+// `docker_login.creds_file` (--age-key flag, $AXUP_AGE_KEY, auto-discovered
+// keys). Returns os.ErrNotExist (wrapped) if the file is absent, so callers
+// that want the optional-default behaviour can branch with errors.Is.
+func LoadPath(path string) (*Inventory, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", p, err)
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if secrets.LooksEncrypted(data) {
+		plain, err := secrets.Decrypt(data)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt %s: %w", path, err)
+		}
+		data = plain
 	}
 	var inv Inventory
 	if err := yaml.Unmarshal(data, &inv); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", p, err)
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
-	inv.Path = p
+	inv.Path = path
 	if err := inv.validate(); err != nil {
 		return nil, err
 	}

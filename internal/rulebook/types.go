@@ -65,17 +65,72 @@ func (r *Rulebook) PhaseNames() []string {
 	return out
 }
 
-// SecretsSpec declares which files in the project are managed by `deploy
+// SecretsSpec declares which files in the project are managed by `axup
 // secrets` (encrypt in place against the recipients listed in recipients.txt).
 // Used by `axup secrets encrypt` (no args) to iterate the list and by
 // `axup secrets status` to surface plaintext-leftover problems.
 //
-// The runtime decrypt path (when a task reads a creds_file / password_file) is
-// independent — it auto-detects ciphertext by content, regardless of whether
-// the file is declared here. So the block is opt-in convenience, not enforcement.
+// The runtime decrypt path (when a task reads a creds_file / password_file, or
+// when inventory.yaml is loaded) is independent — it auto-detects ciphertext by
+// content, regardless of whether the file is declared here. So the block is
+// opt-in convenience, not enforcement.
 type SecretsSpec struct {
-	RecipientsFile string   `yaml:"recipients_file,omitempty"` // default: recipients.txt next to rulebook
-	Files          []string `yaml:"files,omitempty"`           // paths relative to rulebook dir
+	RecipientsFile string       `yaml:"recipients_file,omitempty"` // default: recipients.txt next to rulebook
+	Files          []SecretFile `yaml:"files,omitempty"`           // paths relative to rulebook dir
+}
+
+// SecretFile is one entry in `secrets.files`. It accepts two YAML shapes:
+//
+//	files:
+//	  - secrets/db.pw                           # simple string → default recipients
+//	  - path: inventory.stage.yaml              # mapping → per-file recipients override
+//	    recipients: recipients.stage.txt
+//
+// Per-file `recipients` lets one rulebook manage several recipient groups —
+// e.g. one age-key set scoped to stage hosts, another scoped to prod.
+type SecretFile struct {
+	Path       string `yaml:"path"`                 // path relative to rulebook dir
+	Recipients string `yaml:"recipients,omitempty"` // optional override of SecretsSpec.RecipientsFile
+}
+
+// UnmarshalYAML accepts either a bare string or a {path, recipients} mapping.
+// Keeps `files: [a.yaml, b.yaml]` working while allowing the longer form for
+// per-file recipient overrides.
+func (s *SecretFile) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		s.Path = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("secrets.files entry: expected string or mapping, got %s", nodeKind(node.Kind))
+	}
+	// Use a sibling struct to avoid recursion into UnmarshalYAML.
+	type alias SecretFile
+	var a alias
+	if err := node.Decode(&a); err != nil {
+		return err
+	}
+	if a.Path == "" {
+		return fmt.Errorf("secrets.files entry: 'path' is required")
+	}
+	*s = SecretFile(a)
+	return nil
+}
+
+func nodeKind(k yaml.Kind) string {
+	switch k {
+	case yaml.DocumentNode:
+		return "document"
+	case yaml.SequenceNode:
+		return "sequence"
+	case yaml.MappingNode:
+		return "mapping"
+	case yaml.ScalarNode:
+		return "scalar"
+	case yaml.AliasNode:
+		return "alias"
+	}
+	return "unknown"
 }
 
 // DepSpec declares a git repository whose modules are imported via `use:`.
