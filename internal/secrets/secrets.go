@@ -88,13 +88,27 @@ func IsStructuredPath(path string) bool {
 // Decrypt returns plaintext for either age- or sops-encrypted input.
 // Pass-through if neither marker matches. Dispatches by content
 // sniff so callers don't need to track the original path.
+//
+// Order matters: check the age armor header FIRST. Old-style whole-file
+// age yaml/json/ini files still on disk (from before the dual-backend
+// release) must keep working — their extension hints at sops but the
+// header is unambiguous proof of age. Only if the header is absent do
+// we look at the sops marker; this also avoids ever passing age bytes
+// to sops's parser, which produces a useless "no key could decrypt"
+// error instead of an honest "age decrypt failed".
 func Decrypt(data []byte) ([]byte, error) {
+	if LooksAgeEncrypted(data) {
+		return decryptAge(data)
+	}
 	if LooksSopsEncrypted(data) {
 		return SopsDecryptBytes(data, "")
 	}
-	if !LooksAgeEncrypted(data) {
-		return data, nil
-	}
+	return data, nil
+}
+
+// decryptAge is the whole-file age path, split out so Decrypt's
+// dispatch stays a clean three-branch read.
+func decryptAge(data []byte) ([]byte, error) {
 	ids, src, err := loadIdentities()
 	if err != nil {
 		return nil, err
