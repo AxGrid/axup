@@ -1,6 +1,7 @@
 /bin/
-/internal/agentbin/bin/deployd-*
-secrets/
+/internal/agentbin/bin/axupd-*
+# project-root only — leave internal/secrets/ (Go package) trackable.
+/secrets/
 *.local.yaml
 .idea/
 .vscode/

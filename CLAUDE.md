@@ -311,6 +311,19 @@ ssh root@cert2.axgrid.com 'rm -rf /opt/<your-app> /root/.axup-state/<name>'
   either drop `secrets/` from the gitignore or move encrypted files to
   `enc/`.
 
+- **Two encryption backends, auto-routed by extension.**
+  `internal/secrets/sops.go` wires the official sops Go library
+  (`github.com/getsops/sops/v3`) in-process — no shell-out to a `sops`
+  binary. `secrets.SopsFormat(path)` returns "yaml"/"json"/"ini"/
+  "dotenv" for the structural cases; non-matching paths go through the
+  legacy whole-file age path. `secrets.Decrypt(data)` sniffs both
+  markers and dispatches without needing the path. Embedding sops
+  bloats the CLI to ~46 MB (the cloud-KMS sub-packages are pulled in
+  via interface dispatch on the Tree's polymorphic KeyGroups — the
+  Go linker can't tree-shake them); matches sops's own binary size.
+  Inlining `common.EncryptTree` + skipping `decrypt.Data` keeps us
+  off `cmd/sops/common` which would drag the CLI helpers in.
+
 - **`docker_compose up` always reports `changed`.** Parsing `docker compose ps`
   reliably across versions is brittle. Don't add a "check if up" heuristic
   without a strong reason. If a task downstream needs the container to be

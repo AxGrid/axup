@@ -36,52 +36,69 @@ var secretsEncryptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		recs, err := loadProjectRecipients(rb)
+		entries, err := resolveSecretFiles(rb, args)
 		if err != nil {
 			return err
 		}
-		var files []string
-		switch {
-		case len(args) == 1:
-			files = []string{args[0]}
-		case rb.Secrets != nil && len(rb.Secrets.Files) > 0:
-			for _, f := range rb.Secrets.Files {
-				if !filepath.IsAbs(f) {
-					f = filepath.Join(rb.Dir, f)
-				}
-				files = append(files, f)
-			}
-		default:
-			return fmt.Errorf("nothing to encrypt: pass a FILE arg or declare secrets.files in %s", secretsRulebook)
-		}
+
+		// Cache parsed recipients lists by file path so we only read each
+		// recipients.txt once across a large secrets.files batch. Two
+		// flavors: parsed age.Recipient (whole-file age) and raw
+		// age1... strings (sops-format files).
+		recCache := map[string][]age.Recipient{}
+		ageStrCache := map[string][]string{}
 
 		encrypted, skipped, missing := 0, 0, 0
-		for _, path := range files {
-			data, err := os.ReadFile(path)
+		for _, e := range entries {
+			data, err := os.ReadFile(e.absPath)
 			if err != nil {
 				if os.IsNotExist(err) {
-					fmt.Printf("MISSING %s (declared but not on disk)\n", path)
+					fmt.Printf("MISSING %s (declared but not on disk)\n", e.absPath)
 					missing++
 					continue
 				}
-				return fmt.Errorf("read %s: %w", path, err)
+				return fmt.Errorf("read %s: %w", e.absPath, err)
 			}
 			if secrets.LooksEncrypted(data) {
-				fmt.Printf("skip    %s (already encrypted)\n", path)
+				fmt.Printf("skip    %s (already encrypted)\n", e.absPath)
 				skipped++
 				continue
 			}
-			out, err := secrets.Encrypt(data, recs)
-			if err != nil {
-				return fmt.Errorf("%s: %w", path, err)
+			// Dispatch by file extension: sops-style structural for
+			// yaml/json/ini/env/toml (keeps the keys visible in diffs),
+			// whole-file age for everything else.
+			var (
+				out  []byte
+				mode string
+			)
+			if format := secrets.SopsFormat(e.absPath); format != "" {
+				ageStrs, err := ageStringsForEntry(rb, e, ageStrCache)
+				if err != nil {
+					return err
+				}
+				out, err = secrets.SopsEncryptBytes(data, format, ageStrs)
+				if err != nil {
+					return fmt.Errorf("%s: %w", e.absPath, err)
+				}
+				mode = "sops/" + format
+			} else {
+				recs, err := recsForEntry(rb, e, recCache)
+				if err != nil {
+					return err
+				}
+				out, err = secrets.Encrypt(data, recs)
+				if err != nil {
+					return fmt.Errorf("%s: %w", e.absPath, err)
+				}
+				mode = "age"
 			}
-			if err := atomicWrite(path, out, 0o600); err != nil {
+			if err := atomicWrite(e.absPath, out, 0o600); err != nil {
 				return err
 			}
-			fmt.Printf("OK      %s\n", path)
+			fmt.Printf("OK      %s  (%s, recipients=%s)\n", e.absPath, mode, e.recipientsLabel)
 			encrypted++
 		}
-		fmt.Printf("\nencrypted=%d skipped=%d missing=%d (recipients=%d)\n", encrypted, skipped, missing, len(recs))
+		fmt.Printf("\nencrypted=%d skipped=%d missing=%d\n", encrypted, skipped, missing)
 		if missing > 0 {
 			return fmt.Errorf("%d declared file(s) were missing on disk", missing)
 		}
@@ -99,7 +116,15 @@ var secretsDecryptCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("read %s: %w", path, err)
 		}
-		out, err := secrets.Decrypt(data)
+		// We know the path here, so pass the sops format explicitly
+		// when applicable. (The runtime Decrypt() byte-sniff path can
+		// only choose yaml-vs-json; dotenv/ini need the extension.)
+		var out []byte
+		if format := secrets.SopsFormat(path); format != "" && secrets.LooksSopsEncrypted(data) {
+			out, err = secrets.SopsDecryptBytes(data, format)
+		} else {
+			out, err = secrets.Decrypt(data)
+		}
 		if err != nil {
 			return err
 		}
@@ -122,14 +147,33 @@ var secretsEditCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		recs, err := loadProjectRecipients(rb)
+		sopsFormat := secrets.SopsFormat(path)
+
+		// Pick the per-file recipients override if the user is editing a file
+		// that's declared in secrets.files; otherwise fall back to the default.
+		// We only need one or the other depending on the mode.
+		var (
+			recs     []age.Recipient
+			ageStrs  []string
+		)
+		if sopsFormat != "" {
+			ageStrs, err = ageStringsForPath(rb, path)
+		} else {
+			recs, err = recipientsForPath(rb, path)
+		}
 		if err != nil {
 			return err
 		}
 		// Read + decrypt (or accept plain if file doesn't exist yet).
+		// For sops formats we MUST pass the format explicitly — the
+		// runtime byte-sniff only resolves yaml-vs-json.
 		var plain []byte
 		if data, err := os.ReadFile(path); err == nil {
-			plain, err = secrets.Decrypt(data)
+			if sopsFormat != "" && secrets.LooksSopsEncrypted(data) {
+				plain, err = secrets.SopsDecryptBytes(data, sopsFormat)
+			} else {
+				plain, err = secrets.Decrypt(data)
+			}
 			if err != nil {
 				return err
 			}
@@ -168,7 +212,12 @@ var secretsEditCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		out, err := secrets.Encrypt(edited, recs)
+		var out []byte
+		if sopsFormat != "" {
+			out, err = secrets.SopsEncryptBytes(edited, sopsFormat, ageStrs)
+		} else {
+			out, err = secrets.Encrypt(edited, recs)
+		}
 		if err != nil {
 			return err
 		}
@@ -191,16 +240,16 @@ var secretsStatusCmd = &cobra.Command{
 		if rb.Secrets == nil || len(rb.Secrets.Files) == 0 {
 			return fmt.Errorf("no secrets.files declared in %s", secretsRulebook)
 		}
-		recPath := secrets.RecipientsPath(rb.Dir, recipientsRel(rb))
+		defaultRec := secrets.RecipientsPath(rb.Dir, recipientsRel(rb))
 		fmt.Printf("rulebook:    %s\n", secretsRulebook)
-		if recPath == "" {
+		if defaultRec == "" {
 			fmt.Printf("recipients:  (none found)\n\n")
 		} else {
-			fmt.Printf("recipients:  %s\n\n", recPath)
+			fmt.Printf("recipients:  %s\n\n", defaultRec)
 		}
 		bad := 0
 		for _, f := range rb.Secrets.Files {
-			path := f
+			path := f.Path
 			if !filepath.IsAbs(path) {
 				path = filepath.Join(rb.Dir, path)
 			}
@@ -212,12 +261,18 @@ var secretsStatusCmd = &cobra.Command{
 				bad++
 			case err != nil:
 				return err
-			case secrets.LooksEncrypted(data):
-				label = "encrypted"
+			case secrets.LooksSopsEncrypted(data):
+				label = "encrypted (sops)"
+			case secrets.LooksAgeEncrypted(data):
+				label = "encrypted (age)"
 			default:
 				bad++
 			}
-			fmt.Printf("  %-10s %s\n", label, f)
+			recLabel := ""
+			if f.Recipients != "" {
+				recLabel = "  (recipients=" + f.Recipients + ")"
+			}
+			fmt.Printf("  %-10s %s%s\n", label, f.Path, recLabel)
 		}
 		if bad > 0 {
 			return fmt.Errorf("%d file(s) not in the expected encrypted state", bad)
@@ -234,11 +289,177 @@ func recipientsRel(rb *rulebook.Rulebook) string {
 	return rb.Secrets.RecipientsFile
 }
 
-// loadProjectRecipients resolves the recipients file path against the rulebook
+// loadProjectRecipients resolves the rulebook-default recipients file path
 // (respecting secrets.recipients_file if set) and parses it.
 func loadProjectRecipients(rb *rulebook.Rulebook) ([]age.Recipient, error) {
 	p := secrets.RecipientsPath(rb.Dir, recipientsRel(rb))
 	return secrets.LoadRecipients(p)
+}
+
+// loadRecipientsAt parses an explicit per-file recipients override (rulebook-
+// relative path is resolved against rb.Dir).
+func loadRecipientsAt(rb *rulebook.Rulebook, rel string) ([]age.Recipient, error) {
+	p := rel
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(rb.Dir, rel)
+	}
+	return secrets.LoadRecipients(p)
+}
+
+// resolvedEntry pairs a declared secrets-file entry with its absolute path and
+// a human-friendly label for the recipients file actually used.
+type resolvedEntry struct {
+	entry           rulebook.SecretFile
+	absPath         string
+	recipientsLabel string // "recipients.txt" (default) or per-file override
+}
+
+// resolveSecretFiles assembles the list of entries to encrypt: either the
+// single argv path, or every entry declared in secrets.files. Per-file
+// recipients overrides ride along on each entry.
+func resolveSecretFiles(rb *rulebook.Rulebook, args []string) ([]resolvedEntry, error) {
+	if len(args) == 1 {
+		ent := rulebook.SecretFile{Path: args[0]}
+		// If this path matches a declared file, inherit its recipients override.
+		if rb.Secrets != nil {
+			for _, f := range rb.Secrets.Files {
+				if samePath(rb.Dir, f.Path, args[0]) {
+					ent = f
+					break
+				}
+			}
+		}
+		return []resolvedEntry{toResolved(rb, ent)}, nil
+	}
+	if rb.Secrets == nil || len(rb.Secrets.Files) == 0 {
+		return nil, fmt.Errorf("nothing to encrypt: pass a FILE arg or declare secrets.files in %s", secretsRulebook)
+	}
+	out := make([]resolvedEntry, 0, len(rb.Secrets.Files))
+	for _, f := range rb.Secrets.Files {
+		out = append(out, toResolved(rb, f))
+	}
+	return out, nil
+}
+
+func toResolved(rb *rulebook.Rulebook, f rulebook.SecretFile) resolvedEntry {
+	abs := f.Path
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(rb.Dir, abs)
+	}
+	label := recipientsRel(rb)
+	if label == "" {
+		label = "recipients.txt"
+	}
+	if f.Recipients != "" {
+		label = f.Recipients
+	}
+	return resolvedEntry{entry: f, absPath: abs, recipientsLabel: label}
+}
+
+// recsForEntry loads (and caches) the recipients list for one entry. Falls
+// back to the rulebook-default recipients when the entry has no override.
+func recsForEntry(rb *rulebook.Rulebook, e resolvedEntry, cache map[string][]age.Recipient) ([]age.Recipient, error) {
+	key := e.entry.Recipients
+	if key == "" {
+		key = "<default>"
+	}
+	if r, ok := cache[key]; ok {
+		return r, nil
+	}
+	var (
+		r   []age.Recipient
+		err error
+	)
+	if e.entry.Recipients != "" {
+		r, err = loadRecipientsAt(rb, e.entry.Recipients)
+	} else {
+		r, err = loadProjectRecipients(rb)
+	}
+	if err != nil {
+		return nil, err
+	}
+	cache[key] = r
+	return r, nil
+}
+
+// ageStringsForEntry is the sops-mode counterpart of recsForEntry —
+// returns the raw `age1...` strings for sops's `--age` recipient list.
+// Same per-file override + caching pattern.
+func ageStringsForEntry(rb *rulebook.Rulebook, e resolvedEntry, cache map[string][]string) ([]string, error) {
+	key := e.entry.Recipients
+	if key == "" {
+		key = "<default>"
+	}
+	if r, ok := cache[key]; ok {
+		return r, nil
+	}
+	relOrDefault := e.entry.Recipients
+	if relOrDefault == "" {
+		relOrDefault = recipientsRel(rb)
+	}
+	p := secrets.RecipientsPath(rb.Dir, relOrDefault)
+	strs, err := secrets.LoadAgeRecipientStrings(p)
+	if err != nil {
+		return nil, err
+	}
+	cache[key] = strs
+	return strs, nil
+}
+
+// ageStringsForPath is the sops-mode counterpart of recipientsForPath,
+// used by `axup secrets edit` when the file being edited is a sops
+// format.
+func ageStringsForPath(rb *rulebook.Rulebook, path string) ([]string, error) {
+	rel := ""
+	if rb.Secrets != nil {
+		for _, f := range rb.Secrets.Files {
+			if samePath(rb.Dir, f.Path, path) && f.Recipients != "" {
+				rel = f.Recipients
+				break
+			}
+		}
+	}
+	if rel == "" {
+		rel = recipientsRel(rb)
+	}
+	p := secrets.RecipientsPath(rb.Dir, rel)
+	return secrets.LoadAgeRecipientStrings(p)
+}
+
+// recipientsForPath picks recipients for `axup secrets edit FILE`: if FILE
+// matches a declared secrets.files entry with its own recipients, use those;
+// otherwise the rulebook default.
+func recipientsForPath(rb *rulebook.Rulebook, path string) ([]age.Recipient, error) {
+	if rb.Secrets != nil {
+		for _, f := range rb.Secrets.Files {
+			if samePath(rb.Dir, f.Path, path) && f.Recipients != "" {
+				return loadRecipientsAt(rb, f.Recipients)
+			}
+		}
+	}
+	return loadProjectRecipients(rb)
+}
+
+// samePath compares a declared rulebook-relative path against the
+// argv-provided path (which can be relative to CWD or absolute).
+func samePath(rulebookDir, declared, given string) bool {
+	a := declared
+	if !filepath.IsAbs(a) {
+		a = filepath.Join(rulebookDir, a)
+	}
+	b := given
+	if !filepath.IsAbs(b) {
+		b, _ = filepath.Abs(b)
+	}
+	aClean, _ := filepath.EvalSymlinks(a)
+	bClean, _ := filepath.EvalSymlinks(b)
+	if aClean == "" {
+		aClean = filepath.Clean(a)
+	}
+	if bClean == "" {
+		bClean = filepath.Clean(b)
+	}
+	return aClean == bClean
 }
 
 // rulebookDir returns the directory containing the rulebook so we can find

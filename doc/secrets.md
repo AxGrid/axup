@@ -9,6 +9,27 @@ runner can find.
 This page covers: setup, the two pieces of config a project needs, the CLI
 commands, and how multiple developers share a project.
 
+## Two encryption modes (chosen automatically by extension)
+
+axup picks the encryption format from the file's extension:
+
+| File extension | Mode | What the encrypted file looks like |
+|---|---|---|
+| `.yaml` / `.yml` / `.json` / `.ini` / `.toml` / `.env` | **sops-style structural** — leaf values encrypted, keys remain visible | git-diffable; reviewers can see which key changed without decrypting |
+| anything else (binaries, `.conf`, `.pem`, `.cert`, …) | **whole-file age armor** | opaque base64 blob between `-----BEGIN AGE ENCRYPTED FILE-----` markers |
+
+Trailing template suffixes (`.tmpl`, `.template`, `.j2`) are stripped
+before the extension lookup — `inventory.prod.yaml.tmpl` still routes
+to the YAML/sops path.
+
+Both modes use age recipients from the same `recipients.txt` (sops's
+SSH-key recipients aren't supported — only `age1…` lines pass through;
+the rest are silently dropped when running sops-mode encrypt).
+
+Decryption is auto-detected from file content (`-----BEGIN AGE…` →
+age path; `ENC[AES256_GCM,…` anywhere in the body → sops path), so
+callers don't need to know which mode a file was encrypted in.
+
 ## What encryption protects
 
 Two task fields go through the encryption pipeline:
