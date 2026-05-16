@@ -9,11 +9,20 @@ import (
 	"github.com/axgrid/axup/internal/cli"
 )
 
-// Version is overridden at build time via -ldflags "-X main.Version=...".
-var Version = "dev"
+// Version, Commit and BuildDate are overridden at build time via
+// -ldflags "-X main.Version=... -X main.Commit=... -X main.BuildDate=...".
+// The Makefile populates them from `git describe --tags --always --dirty`,
+// `git rev-parse --short HEAD` and `date -u +%Y-%m-%dT%H:%M:%SZ`.
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildDate = "unknown"
+)
 
 func main() {
 	cli.Version = Version
+	cli.Commit = Commit
+	cli.BuildDate = BuildDate
 	if err := cli.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

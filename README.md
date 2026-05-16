@@ -119,6 +119,30 @@ The sops backend uses the official sops Go library ([github.com/getsops/sops/v3]
 
 Full reference + identity-discovery chain in [doc/secrets.md](doc/secrets.md).
 
+## Version & updating
+
+`axup version` (or `axup --version` / `-v`) prints the build's tag, commit and date:
+
+```
+$ axup version
+axup v0.0.3 commit=ab12cde built=2026-05-16T20:17:40Z darwin/arm64
+```
+
+The tag is taken from `git describe --tags --always --dirty` at build time. A clean release looks like `v0.0.3`; a build on top of `v0.0.3` with local changes shows `v0.0.3-2-gab12cde-dirty`.
+
+There is **no `axup update` / `self-update` command** — updating is a `git pull && make install`:
+
+```sh
+cd /path/to/axup
+git pull
+make install                          # → /usr/local/bin/axup (uses sudo if needed)
+# or, to install into your user prefix without sudo:
+make install PREFIX=$HOME/.local      # → $HOME/.local/bin/axup
+axup version                          # confirm new build
+```
+
+`make install` always rebuilds, embeds a fresh agent for `linux/{amd64,arm64}`, and overwrites the binary at `$(PREFIX)/bin/axup`. To downgrade, `git checkout v0.0.2 && make install`.
+
 ## Documentation
 
 | Doc | What it covers |

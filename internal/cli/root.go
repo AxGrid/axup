@@ -7,7 +7,15 @@ import (
 	"github.com/axgrid/axup/internal/secrets"
 )
 
-var Version = "dev"
+// Version, Commit and BuildDate are set by the linker (-X) from the Makefile
+// based on `git describe --tags --always --dirty`, `git rev-parse --short HEAD`
+// and the build time. They default to "dev"/"none"/"unknown" for `go run` /
+// `go install` users who don't go through the Makefile.
+var (
+	Version   = "dev"
+	Commit    = "none"
+	BuildDate = "unknown"
+)
 
 var (
 	dryRun      bool
@@ -22,6 +30,7 @@ var rootCmd = &cobra.Command{
 	Long:          "axup bootstraps servers and rolls out projects via rulebook.yaml playbooks over SSH.",
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	Version:       "set-at-init", // overwritten in init() once Version is wired in
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		// Sync persistent flags into packages that read them at run time.
 		runner.NoColor = noColor
@@ -29,9 +38,16 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func Execute() error { return rootCmd.Execute() }
+func Execute() error {
+	// Version/Commit/BuildDate are populated by main() before this call, so
+	// resolve the cobra --version string here (init() runs too early — the
+	// defaults would have been baked in).
+	rootCmd.Version = versionString()
+	return rootCmd.Execute()
+}
 
 func init() {
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	rootCmd.PersistentFlags().StringVar(&sshKeyPath, "key", "", "Path to SSH private key (overrides ssh-agent / default key discovery)")
 	rootCmd.PersistentFlags().StringVar(&sshPassword, "password", "", "SSH password (insecure on shared machines; prefer --ask-password)")
 	rootCmd.PersistentFlags().BoolVar(&sshAskPassword, "ask-password", false, "Prompt for SSH password on TTY")
