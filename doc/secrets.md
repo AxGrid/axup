@@ -75,12 +75,25 @@ secrets:
   files:
     - secrets/registry.example.com.yaml
     - secrets/db.pw
+    # Long form: per-file recipients override AND/OR explicit backend.
+    - path: secrets/prod-creds.yaml
+      recipients: recipients.prod.txt
+    - path: secrets/ssh-only.yaml         # ssh-* recipients only? force age
+      format: age                         # so sops's "no age1… recipients" doesn't bite
 ```
 
 The block is optional. With it, `axup secrets encrypt` (no args) operates
 on the whole declared set, and `axup secrets status` reports the state of
 every file (encrypted / plaintext / missing). Without it, you encrypt files
 one at a time by passing each path to `axup secrets encrypt FILE`.
+
+Each `files:` entry is either a bare string (just a path) or a mapping with:
+
+| Field | Meaning |
+|---|---|
+| `path` (required) | File path, relative to rulebook dir. |
+| `recipients` | Override `recipients_file` for this file only (e.g. stage vs prod keyrings in one rulebook). |
+| `format` | `""` / `auto` (default) → pick by extension. `age` → force whole-file age (use when recipients are ssh-\* keys, since sops only accepts age1…). `sops` → force sops (only valid for `.yaml/.yml/.json/.ini/.env/.toml`). |
 
 ## CLI commands
 

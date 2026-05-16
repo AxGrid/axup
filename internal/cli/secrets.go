@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"filippo.io/age"
 	"github.com/spf13/cobra"
@@ -64,23 +65,30 @@ var secretsEncryptCmd = &cobra.Command{
 				skipped++
 				continue
 			}
-			// Dispatch by file extension: sops-style structural for
-			// yaml/json/ini/env/toml (keeps the keys visible in diffs),
-			// whole-file age for everything else.
+			// Dispatch by `format:` override if set, otherwise by file
+			// extension: sops-style structural for yaml/json/ini/env/toml
+			// (keeps the keys visible in diffs), whole-file age for
+			// everything else. `format: age` is the escape hatch for
+			// projects whose recipients are ssh-* keys (which sops can't
+			// consume) but whose files are yaml/json/…
 			var (
 				out  []byte
 				mode string
 			)
-			if format := secrets.SopsFormat(e.absPath); format != "" {
+			useSops, sopsFormat, err := chooseFormat(e)
+			if err != nil {
+				return err
+			}
+			if useSops {
 				ageStrs, err := ageStringsForEntry(rb, e, ageStrCache)
 				if err != nil {
 					return err
 				}
-				out, err = secrets.SopsEncryptBytes(data, format, ageStrs)
+				out, err = secrets.SopsEncryptBytes(data, sopsFormat, ageStrs)
 				if err != nil {
 					return fmt.Errorf("%s: %w", e.absPath, err)
 				}
-				mode = "sops/" + format
+				mode = "sops/" + sopsFormat
 			} else {
 				recs, err := recsForEntry(rb, e, recCache)
 				if err != nil {
@@ -147,16 +155,21 @@ var secretsEditCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		sopsFormat := secrets.SopsFormat(path)
+		// Resolve format via the secrets.files entry (if FILE is declared),
+		// falling back to extension-based dispatch otherwise.
+		useSops, sopsFormat, err := chooseFormatForPath(rb, path)
+		if err != nil {
+			return err
+		}
 
 		// Pick the per-file recipients override if the user is editing a file
 		// that's declared in secrets.files; otherwise fall back to the default.
 		// We only need one or the other depending on the mode.
 		var (
-			recs     []age.Recipient
-			ageStrs  []string
+			recs    []age.Recipient
+			ageStrs []string
 		)
-		if sopsFormat != "" {
+		if useSops {
 			ageStrs, err = ageStringsForPath(rb, path)
 		} else {
 			recs, err = recipientsForPath(rb, path)
@@ -169,7 +182,7 @@ var secretsEditCmd = &cobra.Command{
 		// runtime byte-sniff only resolves yaml-vs-json.
 		var plain []byte
 		if data, err := os.ReadFile(path); err == nil {
-			if sopsFormat != "" && secrets.LooksSopsEncrypted(data) {
+			if useSops && secrets.LooksSopsEncrypted(data) {
 				plain, err = secrets.SopsDecryptBytes(data, sopsFormat)
 			} else {
 				plain, err = secrets.Decrypt(data)
@@ -213,7 +226,7 @@ var secretsEditCmd = &cobra.Command{
 			return err
 		}
 		var out []byte
-		if sopsFormat != "" {
+		if useSops {
 			out, err = secrets.SopsEncryptBytes(edited, sopsFormat, ageStrs)
 		} else {
 			out, err = secrets.Encrypt(edited, recs)
@@ -424,6 +437,49 @@ func ageStringsForPath(rb *rulebook.Rulebook, path string) ([]string, error) {
 	}
 	p := secrets.RecipientsPath(rb.Dir, rel)
 	return secrets.LoadAgeRecipientStrings(p)
+}
+
+// chooseFormat decides whether to encrypt one entry as sops-structural or as
+// whole-file age. Honors an explicit `format:` in the secrets.files entry;
+// otherwise falls back to extension-based auto-detection (sops for
+// yaml/json/ini/env/toml, age for everything else).
+//
+// Returns (useSops, sopsFormat, err). When useSops is false, sopsFormat is "".
+func chooseFormat(e resolvedEntry) (bool, string, error) {
+	switch strings.ToLower(e.entry.Format) {
+	case "age":
+		return false, "", nil
+	case "sops":
+		f := secrets.SopsFormat(e.absPath)
+		if f == "" {
+			return false, "", fmt.Errorf("%s: format: sops requires a structured extension (.yaml/.yml/.json/.ini/.env/.toml)", e.entry.Path)
+		}
+		return true, f, nil
+	case "", "auto":
+		f := secrets.SopsFormat(e.absPath)
+		return f != "", f, nil
+	default:
+		return false, "", fmt.Errorf("%s: unknown format %q (allowed: age, sops, auto)", e.entry.Path, e.entry.Format)
+	}
+}
+
+// chooseFormatForPath resolves the dispatch for `axup secrets edit FILE`:
+// look up FILE in secrets.files (honoring its `format:` override if any),
+// or fall back to extension-based auto-detection when FILE isn't declared.
+func chooseFormatForPath(rb *rulebook.Rulebook, path string) (bool, string, error) {
+	if rb.Secrets != nil {
+		for _, f := range rb.Secrets.Files {
+			if samePath(rb.Dir, f.Path, path) {
+				abs := f.Path
+				if !filepath.IsAbs(abs) {
+					abs = filepath.Join(rb.Dir, abs)
+				}
+				return chooseFormat(resolvedEntry{entry: f, absPath: abs})
+			}
+		}
+	}
+	f := secrets.SopsFormat(path)
+	return f != "", f, nil
 }
 
 // recipientsForPath picks recipients for `axup secrets edit FILE`: if FILE

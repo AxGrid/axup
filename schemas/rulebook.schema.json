@@ -31,7 +31,7 @@
         },
         "files": {
           "type": "array",
-          "description": "Files (relative to rulebook dir) age-encrypted via `axup secrets encrypt`. Each entry is either a bare path string or a {path, recipients} mapping for per-file recipient overrides.",
+          "description": "Files (relative to rulebook dir) encrypted via `axup secrets encrypt`. Each entry is either a bare path string or a {path, recipients?, format?} mapping for per-file overrides.",
           "items": {
             "oneOf": [
               { "type": "string" },
@@ -40,7 +40,12 @@
                 "required": ["path"],
                 "properties": {
                   "path": { "type": "string" },
-                  "recipients": { "type": "string", "description": "Override SecretsSpec.recipients_file for this file only." }
+                  "recipients": { "type": "string", "description": "Override SecretsSpec.recipients_file for this file only." },
+                  "format": {
+                    "type": "string",
+                    "enum": ["", "auto", "age", "sops"],
+                    "description": "Force the encryption backend. '' / 'auto' (default) picks by extension: sops for yaml/yml/json/ini/env/toml, age otherwise. 'age' forces whole-file age regardless of extension — use this when recipients are ssh-* keys (sops only accepts age1… recipients). 'sops' forces sops (only valid for structured extensions)."
+                  }
                 },
                 "additionalProperties": false
               }

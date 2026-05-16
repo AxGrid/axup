@@ -85,12 +85,27 @@ type SecretsSpec struct {
 //	  - secrets/db.pw                           # simple string → default recipients
 //	  - path: inventory.stage.yaml              # mapping → per-file recipients override
 //	    recipients: recipients.stage.txt
+//	  - path: inventory.prod.yaml               # …or force a specific encryption mode
+//	    recipients: recipients.prod.txt
+//	    format: age                             # whole-file age (default for structured
+//	                                            #   files is "sops"; "age" forces the
+//	                                            #   whole-file mode so ssh-* recipients
+//	                                            #   keep working on .yaml/.json/.env/…)
 //
 // Per-file `recipients` lets one rulebook manage several recipient groups —
 // e.g. one age-key set scoped to stage hosts, another scoped to prod.
+//
+// `format` is one of:
+//   - ""     (default): pick by extension — yaml/yml/json/ini/env/toml → sops
+//     (per-leaf, structure-preserving) and anything else → age (whole-file).
+//   - "age": force whole-file age regardless of extension. Use this when
+//     recipients are ssh-* keys (sops only takes age1… recipients).
+//   - "sops": force sops (only valid for the structured extensions listed
+//     above; recipients must be age1…).
 type SecretFile struct {
 	Path       string `yaml:"path"`                 // path relative to rulebook dir
 	Recipients string `yaml:"recipients,omitempty"` // optional override of SecretsSpec.RecipientsFile
+	Format     string `yaml:"format,omitempty"`     // "age", "sops", or "" (auto by extension)
 }
 
 // UnmarshalYAML accepts either a bare string or a {path, recipients} mapping.
