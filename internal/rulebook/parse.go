@@ -243,6 +243,12 @@ func validateTasks(phase string, tasks []Task) error {
 		if t.Group != nil {
 			set++
 		}
+		if t.Chmod != nil {
+			set++
+		}
+		if t.Chown != nil {
+			set++
+		}
 		if t.Download != nil {
 			set++
 		}
@@ -270,7 +276,7 @@ func validateTasks(phase string, tasks []Task) error {
 			return fmt.Errorf("%s[%d] (%q): use %q did not resolve — declare the dep in deps:[]", phase, i, t.Name, t.Use)
 		}
 		if set == 0 {
-			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/group/download/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
+			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/group/chmod/chown/download/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
 		}
 		if set > 1 {
 			return fmt.Errorf("%s[%d] (%q): multiple operations set; choose exactly one", phase, i, t.Name)
@@ -320,6 +326,25 @@ func validateTasks(phase string, tasks []Task) error {
 			case "", "present", "absent":
 			default:
 				return fmt.Errorf("%s[%d] (%q): group state must be 'present' or 'absent', got %q", phase, i, t.Name, t.Group.State)
+			}
+		}
+		if t.Chmod != nil {
+			if t.Chmod.Path == "" {
+				return fmt.Errorf("%s[%d] (%q): chmod requires path", phase, i, t.Name)
+			}
+			if t.Chmod.Mode == "" {
+				return fmt.Errorf("%s[%d] (%q): chmod requires mode (e.g. \"0644\")", phase, i, t.Name)
+			}
+			if _, err := strconv.ParseUint(t.Chmod.Mode, 8, 32); err != nil {
+				return fmt.Errorf("%s[%d] (%q): chmod mode %q is not a valid octal string", phase, i, t.Name, t.Chmod.Mode)
+			}
+		}
+		if t.Chown != nil {
+			if t.Chown.Path == "" {
+				return fmt.Errorf("%s[%d] (%q): chown requires path", phase, i, t.Name)
+			}
+			if t.Chown.Owner == "" && t.Chown.Group == "" {
+				return fmt.Errorf("%s[%d] (%q): chown requires at least one of owner/group", phase, i, t.Name)
 			}
 		}
 		if t.Download != nil {
@@ -420,8 +445,8 @@ func validateTasks(phase string, tasks []Task) error {
 				return fmt.Errorf("%s[%d] (%q): docker_login location must be one of both/local/remote, got %q", phase, i, t.Name, t.DockerLogin.Location)
 			}
 		}
-		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil || t.Mkdir != nil || t.Symlink != nil || t.Remove != nil || t.Download != nil) {
-			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template/mkdir/symlink/remove/download (each one stats its path and decides skip-vs-apply on its own)", phase, i, t.Name)
+		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil || t.Mkdir != nil || t.Symlink != nil || t.Remove != nil || t.Chmod != nil || t.Chown != nil || t.Download != nil) {
+			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template/mkdir/symlink/remove/chmod/chown/download (each one stats its path and decides skip-vs-apply on its own)", phase, i, t.Name)
 		}
 	}
 	return nil

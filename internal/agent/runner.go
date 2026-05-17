@@ -175,6 +175,10 @@ func executeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return runUserTask(ctx, t)
 	case protocol.TaskGroup:
 		return runGroupTask(ctx, t)
+	case protocol.TaskChmod:
+		return runChmodTask(ctx, t)
+	case protocol.TaskChown:
+		return runChownTask(ctx, t)
 	case protocol.TaskDownload:
 		return runDownloadTask(ctx, t)
 	case protocol.TaskApt:

@@ -263,6 +263,8 @@ each below:
 | [`remove`](#remove) | remote | Delete a path (file / dir / symlink), idempotent | `path` |
 | [`user`](#user) | remote | Create / delete a system user; reconcile supplementary groups | `name` |
 | [`group`](#group) | remote | Create / delete a system group | `name` |
+| [`chmod`](#chmod) | remote | Set POSIX mode on an existing path | `path`, `mode` |
+| [`chown`](#chown) | remote | Set owner / group on an existing path (optionally recursive) | `path`, `owner` or `group` |
 | [`download`](#download) | remote | HTTP GET → file on the remote, optional sha256 verification | `url`, `dst` |
 | [`apt`](#apt) | remote | Install / remove Debian packages | `name` (or `update_cache: true`) |
 | [`service`](#service) | remote | Manage a systemd or supervisor unit | `name` |
@@ -276,7 +278,7 @@ Common keys every task may carry:
 | Key | Type | Applies to | Effect |
 |---|---|---|---|
 | `name` | string | every type | Human-readable label shown in CLI output (`▶ <name> (id)`). Defaults to `task #N`. |
-| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login`, `user`, `group` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove` / `download`** — those each stat their own path and decide skip-vs-apply on their own. |
+| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login`, `user`, `group` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove` / `chmod` / `chown` / `download`** — those each stat their own path and decide skip-vs-apply on their own. |
 | `use` | `<dep>/<module_path>` | (special) | Splice a module from a `deps:` entry at this position. Mutually exclusive with the primitives above. See [external-rulebooks.md](external-rulebooks.md). |
 
 Status semantics (what each task can return in events):
@@ -368,12 +370,18 @@ reconciled on every run (drift in any of them triggers chmod / chown).
 Idempotency:
 
 - **Absent** → `mkdir -p` + chmod + optional chown → `changed`.
-- **Present and is a directory, all attributes match** → `skipped`.
-- **Present and is a directory, mode/owner/group drift** → chmod / chown
-  to reconcile → `changed`.
+- **Present and is a directory, requested attributes match** → `skipped`.
+- **Present and is a directory, an explicitly-set attribute drifts** →
+  chmod / chown to reconcile → `changed`.
 - **Present and is a regular file** → `error`. We never auto-`rm` to "fix"
   the conflict — use a `remove:` task before the `mkdir:` if that's
   intentional.
+
+When `mode:` is omitted, `mkdir:` uses 0755 only on CREATE and does NOT
+reconcile mode on subsequent runs. This lets a later `chmod:` task own
+the mode without `mkdir:` fighting it on every re-run. Same shape for
+`owner:` / `group:` — if you don't set them on `mkdir:`, it won't touch
+ownership on an existing dir.
 
 `owner` / `group` are resolved on the remote via `/etc/passwd` and
 `/etc/group`. Failure to resolve a non-empty name returns a clear error
@@ -508,6 +516,73 @@ Idempotency:
 Typical pattern: declare every group your services need at the top of
 `bootstrap:`, then `user: { name: ..., groups: [...] }` further down
 the file picks them up.
+
+### `chmod`
+
+Set POSIX permissions on an existing path. Idempotent — stat first,
+chmod only if the current mode differs.
+
+```yaml
+- chmod:
+    path: /etc/nginx/sites-enabled/foo
+    mode: "0644"
+```
+
+Both `path:` and `mode:` are required. Errors if the path doesn't
+exist (intentional — don't silently no-op on a typo). Symlinks are
+followed (Stat semantics) — chmod on a symlink targets the link's
+contents on Linux anyway, which matches the typical mental model.
+
+No `recursive:` flag — applying a single mode to both directories and
+files in a tree is rarely what you want (dirs usually need the
+exec/search bit, files don't). For tree-wide perm management drop
+to a `command:` task:
+
+```yaml
+- command: "find /opt/myapp -type d -exec chmod 0755 {} +"
+- command: "find /opt/myapp -type f -exec chmod 0644 {} +"
+```
+
+### `chown`
+
+Set owner / group on an existing path. At least one of `owner:` or
+`group:` must be set.
+
+```yaml
+# Just owner
+- chown: { path: /opt/myapp/data, owner: app }
+
+# Owner + group
+- chown:
+    path: /opt/myapp/bin
+    owner: app
+    group: app
+
+# Recursive: walk the tree and chown -RP every entry
+- chown:
+    path: /opt/myapp
+    owner: app
+    group: app
+    recursive: true                    # default false
+```
+
+Idempotency: stat the TOP `path:`. If its current uid/gid already
+matches the requested values, the task is `skipped` — INCLUDING the
+recursive case. The assumption is "if the top is right, the tree is
+right too", which holds when every chown on this tree has gone through
+this task. Edge case: a manual chown by another admin on some
+children won't trigger a re-run; force it by chowning the top to a
+different user first, then back.
+
+Recursive walk uses `Lchown` (chown -RP semantics) — owner of the
+symlink itself, never its target. Without `recursive:` we also Lchown
+the single path.
+
+Owner / group are resolved on the remote via `/etc/passwd` and
+`/etc/group`. Failure to resolve a non-empty name returns a clear
+error rather than silently chowning to uid `-1` — pair `chown:` with
+an upstream [`user`](#user) / [`group`](#group) task if the principal
+doesn't exist yet.
 
 ### `download`
 
@@ -722,6 +797,8 @@ tasks:
 - `remove:` is missing `path:`
 - `user:` is missing `name:`, has an invalid `state:`, or sets shell/home/groups with `state: absent`
 - `group:` is missing `name:` or has an invalid `state:`
+- `chmod:` is missing `path:` / `mode:`, or has a non-octal `mode:`
+- `chown:` is missing `path:`, or has neither `owner:` nor `group:`
 - `download:` is missing `url:` or `dst:`, has a non-octal `mode:`, or has a `sha256:` that isn't 64 hex chars
 - `apt:` is missing `name:`, or has an invalid `state:`
 - `service:` is missing `name:`, or has an invalid `state:` / `provider:`,

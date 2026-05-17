@@ -156,6 +156,30 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 			return err
 		}
 	}
+	if t.Chmod != nil {
+		if s, err := renderString(t.Chmod.Path, vars); err == nil {
+			t.Chmod.Path = s
+		} else {
+			return err
+		}
+	}
+	if t.Chown != nil {
+		if s, err := renderString(t.Chown.Path, vars); err == nil {
+			t.Chown.Path = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Chown.Owner, vars); err == nil {
+			t.Chown.Owner = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Chown.Group, vars); err == nil {
+			t.Chown.Group = s
+		} else {
+			return err
+		}
+	}
 	if t.Download != nil {
 		if s, err := renderString(t.Download.URL, vars); err == nil {
 			t.Download.URL = s

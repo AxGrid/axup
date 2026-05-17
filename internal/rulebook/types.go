@@ -191,6 +191,8 @@ type Task struct {
 	Remove        *RemoveSpec        `yaml:"remove,omitempty"`
 	User          *UserSpec          `yaml:"user,omitempty"`
 	Group         *GroupSpec         `yaml:"group,omitempty"`
+	Chmod         *ChmodSpec         `yaml:"chmod,omitempty"`
+	Chown         *ChownSpec         `yaml:"chown,omitempty"`
 	Download      *DownloadSpec      `yaml:"download,omitempty"`
 	Apt           *AptSpec           `yaml:"apt,omitempty"`
 	Service       *ServiceSpec       `yaml:"service,omitempty"`
@@ -339,6 +341,31 @@ func (g *GroupSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// ChmodSpec sets POSIX permissions on an existing path. Idempotent by
+// stat — current mode matches → skipped, else chmod → changed.
+//
+// No recursive support in MVP: a single `mode:` knob can't sensibly
+// apply to both dirs and files in a tree (dirs typically want `+x`,
+// files don't). For tree-wide perm management use a `command:` task
+// (`find -type d -exec chmod 0755 + ; find -type f -exec chmod 0644 +`).
+type ChmodSpec struct {
+	Path string `yaml:"path"`
+	Mode string `yaml:"mode"`
+}
+
+// ChownSpec sets owner / group on an existing path. At least one of
+// owner / group must be set. Recursive flag walks the tree with `chown
+// -R` semantics — idempotency-wise we only check the TOP path's
+// current ownership (assumption: tree state matches top, which holds
+// when previous chown runs all went through this task). For surgical
+// per-file checks, run the task non-recursively at the target file.
+type ChownSpec struct {
+	Path      string `yaml:"path"`
+	Owner     string `yaml:"owner,omitempty"`
+	Group     string `yaml:"group,omitempty"`
+	Recursive bool   `yaml:"recursive,omitempty"` // default false
+}
+
 // DownloadSpec fetches a URL to a path on the remote. Idempotency:
 //   - dst absent → download → changed
 //   - dst present + sha256 set + matches → skipped
@@ -481,6 +508,10 @@ func (t Task) Kind() string {
 		return "user"
 	case t.Group != nil:
 		return "group"
+	case t.Chmod != nil:
+		return "chmod"
+	case t.Chown != nil:
+		return "chown"
 	case t.Download != nil:
 		return "download"
 	case t.Apt != nil:

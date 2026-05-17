@@ -33,6 +33,8 @@ const (
 	TaskRemove        = "remove"
 	TaskUser          = "user"
 	TaskGroup         = "group"
+	TaskChmod         = "chmod"
+	TaskChown         = "chown"
 	TaskDownload      = "download"
 	TaskApt           = "apt"
 	TaskService       = "service"
@@ -109,6 +111,11 @@ type Task struct {
 	// group:
 	GroupName  string `json:"group_name,omitempty"`
 	GroupState string `json:"group_state,omitempty"` // present (default) | absent
+
+	// chmod / chown (target path reuses DstPath; chmod reuses Mode):
+	ChownOwner     string `json:"chown_owner,omitempty"`
+	ChownGroup     string `json:"chown_group,omitempty"`
+	ChownRecursive bool   `json:"chown_recursive,omitempty"` // walks the tree with chown -R semantics
 
 	// download:
 	DownloadURL     string            `json:"download_url,omitempty"`

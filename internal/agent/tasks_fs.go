@@ -35,6 +35,12 @@ func runMkdirTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	if t.MkdirPath == "" {
 		return protocol.Event{Status: protocol.StatusError, Message: "mkdir: empty path"}
 	}
+	// modeSet distinguishes "user explicitly asked for this mode" from
+	// "no mode specified" — in the latter case we use 0755 ONLY on
+	// create, and skip mode reconciliation on existing dirs. Without
+	// this distinction mkdir would fight a downstream chmod task on
+	// every re-run.
+	modeSet := t.Mode != ""
 	mode, err := parseModeOr(t.Mode, 0o755)
 	if err != nil {
 		return protocol.Event{Status: protocol.StatusError, Path: t.MkdirPath, Message: "bad mode: " + err.Error()}
@@ -74,10 +80,10 @@ func runMkdirTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return protocol.Event{Status: protocol.StatusError, Path: t.MkdirPath, Message: "exists but is not a directory (refusing to auto-rm)"}
 
 	default:
-		// Dir exists — reconcile mode + ownership.
+		// Dir exists — reconcile only the attributes the user explicitly set.
 		curMode := st.Mode().Perm()
 		curUID, curGID := statOwner(st)
-		needChmod := curMode != mode
+		needChmod := modeSet && curMode != mode
 		needChown := (uid != -1 && curUID != uid) || (gid != -1 && curGID != gid)
 		if !needChmod && !needChown {
 			return protocol.Event{Status: protocol.StatusSkipped, Path: t.MkdirPath}

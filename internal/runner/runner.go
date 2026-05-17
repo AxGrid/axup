@@ -431,15 +431,15 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 			})
 
 		case "mkdir":
-			mode := t.Mkdir.Mode
-			if mode == "" {
-				mode = "0755"
-			}
+			// Leave Mode empty when the user didn't set one — agent then
+			// uses 0755 on CREATE only, and skips mode reconciliation on
+			// existing dirs. This way a later `chmod:` task can own the
+			// mode without `mkdir:` fighting it on every run.
 			remoteTasks = append(remoteTasks, protocol.Task{
 				ID: baseID, Name: name,
 				Type:       protocol.TaskMkdir,
 				MkdirPath:  t.Mkdir.Path,
-				Mode:       mode,
+				Mode:       t.Mkdir.Mode,
 				MkdirOwner: t.Mkdir.Owner,
 				MkdirGroup: t.Mkdir.Group,
 			})
@@ -491,6 +491,24 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 				Type:       protocol.TaskGroup,
 				GroupName:  t.Group.Name,
 				GroupState: state,
+			})
+
+		case "chmod":
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:    protocol.TaskChmod,
+				DstPath: t.Chmod.Path,
+				Mode:    t.Chmod.Mode,
+			})
+
+		case "chown":
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:           protocol.TaskChown,
+				DstPath:        t.Chown.Path,
+				ChownOwner:     t.Chown.Owner,
+				ChownGroup:     t.Chown.Group,
+				ChownRecursive: t.Chown.Recursive,
 			})
 
 		case "download":

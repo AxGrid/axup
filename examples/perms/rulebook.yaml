@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: perms-demo
+
+bootstrap:
+  - group: permsgrp
+  - user:
+      name: permsuser
+      groups: [permsgrp]
+
+  # Prepare a tree to permissively chmod / chown.
+  - mkdir: /opt/perms-demo
+  - mkdir: /opt/perms-demo/sub
+  - command: "touch /opt/perms-demo/sub/file.txt"
+
+  # chmod the top dir
+  - chmod:
+      path: /opt/perms-demo
+      mode: "0750"
+
+  # chmod a single file
+  - chmod:
+      path: /opt/perms-demo/sub/file.txt
+      mode: "0640"
+
+  # chown the whole tree recursively
+  - chown:
+      path: /opt/perms-demo
+      owner: permsuser
+      group: permsgrp
+      recursive: true
