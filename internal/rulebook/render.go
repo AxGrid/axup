@@ -130,6 +130,49 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 			return err
 		}
 	}
+	if t.User != nil {
+		if s, err := renderString(t.User.Name, vars); err == nil {
+			t.User.Name = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.User.Home, vars); err == nil {
+			t.User.Home = s
+		} else {
+			return err
+		}
+		for i, g := range t.User.Groups {
+			s, err := renderString(g, vars)
+			if err != nil {
+				return err
+			}
+			t.User.Groups[i] = s
+		}
+	}
+	if t.Download != nil {
+		if s, err := renderString(t.Download.URL, vars); err == nil {
+			t.Download.URL = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Download.Dst, vars); err == nil {
+			t.Download.Dst = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Download.Sha256, vars); err == nil {
+			t.Download.Sha256 = s
+		} else {
+			return err
+		}
+		for k, v := range t.Download.Headers {
+			s, err := renderString(v, vars)
+			if err != nil {
+				return err
+			}
+			t.Download.Headers[k] = s
+		}
+	}
 	if t.Apt != nil {
 		for i, n := range t.Apt.Name {
 			s, err := renderString(n, vars)

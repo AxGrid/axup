@@ -189,6 +189,8 @@ type Task struct {
 	Mkdir         *MkdirSpec         `yaml:"mkdir,omitempty"`
 	Symlink       *SymlinkSpec       `yaml:"symlink,omitempty"`
 	Remove        *RemoveSpec        `yaml:"remove,omitempty"`
+	User          *UserSpec          `yaml:"user,omitempty"`
+	Download      *DownloadSpec      `yaml:"download,omitempty"`
 	Apt           *AptSpec           `yaml:"apt,omitempty"`
 	Service       *ServiceSpec       `yaml:"service,omitempty"`
 	DockerCompose *DockerComposeSpec `yaml:"docker_compose,omitempty"`
@@ -269,6 +271,60 @@ type SymlinkSpec struct {
 type RemoveSpec struct {
 	Path      string `yaml:"path"`
 	Recursive bool   `yaml:"recursive,omitempty"` // default false; true = rm -rf
+}
+
+// UserSpec creates or deletes a system user on the remote. MVP scope: it does
+// NOT reconcile attributes of an existing user (shell, home, uid, primary
+// group) — present-state is "exists with the right name", absent-state is
+// "doesn't exist". Supplementary groups are the one exception: reconciled
+// via `usermod -aG <group>` each run, so a new group added to the rulebook
+// gets attached without recreating the user.
+//
+// Always passes `-r` (system user). For interactive users, drop down to
+// `command:` — that's a less common need for ops tooling.
+//
+// Shorthand `user: app` is sugar for `user: { name: app }`.
+type UserSpec struct {
+	Name       string   `yaml:"name"`
+	Shell      string   `yaml:"shell,omitempty"`       // default /usr/sbin/nologin
+	Home       string   `yaml:"home,omitempty"`        // when set, passed as --home-dir
+	CreateHome bool     `yaml:"create_home,omitempty"` // pair with home: to actually mkdir it
+	Groups     []string `yaml:"groups,omitempty"`      // supplementary groups
+	State      string   `yaml:"state,omitempty"`       // present (default) | absent
+}
+
+func (u *UserSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		u.Name = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("user: expected string name or mapping, got %s", nodeKind(node.Kind))
+	}
+	type alias UserSpec
+	var a alias
+	if err := node.Decode(&a); err != nil {
+		return err
+	}
+	*u = UserSpec(a)
+	return nil
+}
+
+// DownloadSpec fetches a URL to a path on the remote. Idempotency:
+//   - dst absent → download → changed
+//   - dst present + sha256 set + matches → skipped
+//   - dst present + sha256 set + mismatch → re-download → changed
+//   - dst present + no sha256 → skipped (assume OK; doc recommends pinning sha)
+//
+// Headers map enables Authorization / custom headers for private endpoints.
+// Writes atomically (tmp + rename) so a half-downloaded file never appears
+// at dst. Default timeout 10 min; default mode 0644.
+type DownloadSpec struct {
+	URL     string            `yaml:"url"`
+	Dst     string            `yaml:"dst"`
+	Mode    string            `yaml:"mode,omitempty"`    // octal string; default 0644
+	Sha256  string            `yaml:"sha256,omitempty"`  // optional hex digest for verification
+	Headers map[string]string `yaml:"headers,omitempty"` // optional HTTP headers
 }
 
 func (r *RemoveSpec) UnmarshalYAML(node *yaml.Node) error {
@@ -392,6 +448,10 @@ func (t Task) Kind() string {
 		return "symlink"
 	case t.Remove != nil:
 		return "remove"
+	case t.User != nil:
+		return "user"
+	case t.Download != nil:
+		return "download"
 	case t.Apt != nil:
 		return "apt"
 	case t.Service != nil:

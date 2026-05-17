@@ -465,6 +465,37 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 				RemoveRecursive: t.Remove.Recursive,
 			})
 
+		case "user":
+			state := t.User.State
+			if state == "" {
+				state = "present"
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:           protocol.TaskUser,
+				UserName:       t.User.Name,
+				UserShell:      t.User.Shell,
+				UserHome:       t.User.Home,
+				UserCreateHome: t.User.CreateHome,
+				UserGroups:     append([]string{}, t.User.Groups...),
+				UserState:      state,
+			})
+
+		case "download":
+			mode := t.Download.Mode
+			if mode == "" {
+				mode = "0644"
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:            protocol.TaskDownload,
+				DownloadURL:     t.Download.URL,
+				DstPath:         t.Download.Dst,
+				Mode:            mode,
+				Sha256:          t.Download.Sha256,
+				DownloadHeaders: t.Download.Headers,
+			})
+
 		case "apt":
 			state := t.Apt.State
 			if state == "" {

@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: user-download-demo
+
+bootstrap:
+  # user: shorthand — creates system user "axupdemo"
+  - user: axupdemo
+
+  # user: full form, idempotent on a different user
+  - user:
+      name: axupdemo-srv
+      shell: /bin/false
+      groups: [docker]               # supplementary group, must exist (docker does on cert2)
+
+  # Use the new user to own a dir
+  - mkdir:
+      path: /opt/user-download-demo
+      mode: "0755"
+      owner: axupdemo
+      group: axupdemo
+
+  # download: tiny canonical file with verified sha
+  # robots.txt от github.com — стабильный URL, контент редко меняется,
+  # сами sha256 проверим из smoke-теста.
+  - download:
+      url: https://raw.githubusercontent.com/octocat/Hello-World/master/README
+      dst: /opt/user-download-demo/hello.txt
+      mode: "0644"
+      sha256: 03ba204e50d126e4674c005e04d82e84c21366780af1f43bd54a37816b6ab340

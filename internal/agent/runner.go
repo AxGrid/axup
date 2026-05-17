@@ -171,6 +171,10 @@ func executeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return runSymlinkTask(ctx, t)
 	case protocol.TaskRemove:
 		return runRemoveTask(ctx, t)
+	case protocol.TaskUser:
+		return runUserTask(ctx, t)
+	case protocol.TaskDownload:
+		return runDownloadTask(ctx, t)
 	case protocol.TaskApt:
 		return runAptTask(ctx, t)
 	case protocol.TaskService:

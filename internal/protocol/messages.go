@@ -31,6 +31,8 @@ const (
 	TaskMkdir         = "mkdir"
 	TaskSymlink       = "symlink"
 	TaskRemove        = "remove"
+	TaskUser          = "user"
+	TaskDownload      = "download"
 	TaskApt           = "apt"
 	TaskService       = "service"
 	TaskDockerCompose = "docker_compose"
@@ -75,10 +77,10 @@ type Task struct {
 	// command:
 	Command string `json:"command,omitempty"`
 
-	// copy / template:
+	// copy / template / download (shared file-target fields):
 	DstPath string `json:"dst_path,omitempty"`
-	Mode    string `json:"mode,omitempty"`    // octal string, e.g. "0644"; empty = 0644
-	Sha256  string `json:"sha256,omitempty"`  // hex digest of decoded body
+	Mode    string `json:"mode,omitempty"`   // octal string, e.g. "0644"; empty = 0644
+	Sha256  string `json:"sha256,omitempty"` // hex digest of decoded body (copy/template) OR expected sha of downloaded payload (download — optional)
 	BodyB64 string `json:"body_b64,omitempty"`
 
 	// mkdir:
@@ -94,6 +96,18 @@ type Task struct {
 	// remove:
 	RemovePath      string `json:"remove_path,omitempty"`
 	RemoveRecursive bool   `json:"remove_recursive,omitempty"` // dirs require this; without it, rmdir-like (errors on non-empty dirs)
+
+	// user:
+	UserName       string   `json:"user_name,omitempty"`
+	UserShell      string   `json:"user_shell,omitempty"`       // default /usr/sbin/nologin (system users)
+	UserHome       string   `json:"user_home,omitempty"`        // when set, passed as --home-dir
+	UserCreateHome bool     `json:"user_create_home,omitempty"` // pass --create-home / --no-create-home
+	UserGroups     []string `json:"user_groups,omitempty"`      // supplementary groups, reconciled via usermod -aG each run
+	UserState      string   `json:"user_state,omitempty"`       // present (default) | absent
+
+	// download:
+	DownloadURL     string            `json:"download_url,omitempty"`
+	DownloadHeaders map[string]string `json:"download_headers,omitempty"` // optional HTTP headers (e.g. Authorization)
 
 	// apt:
 	AptPackages    []string `json:"apt_packages,omitempty"`

@@ -237,6 +237,12 @@ func validateTasks(phase string, tasks []Task) error {
 		if t.Remove != nil {
 			set++
 		}
+		if t.User != nil {
+			set++
+		}
+		if t.Download != nil {
+			set++
+		}
 		if t.Apt != nil {
 			set++
 		}
@@ -261,7 +267,7 @@ func validateTasks(phase string, tasks []Task) error {
 			return fmt.Errorf("%s[%d] (%q): use %q did not resolve — declare the dep in deps:[]", phase, i, t.Name, t.Use)
 		}
 		if set == 0 {
-			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
+			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/download/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
 		}
 		if set > 1 {
 			return fmt.Errorf("%s[%d] (%q): multiple operations set; choose exactly one", phase, i, t.Name)
@@ -289,6 +295,32 @@ func validateTasks(phase string, tasks []Task) error {
 		}
 		if t.Remove != nil && t.Remove.Path == "" {
 			return fmt.Errorf("%s[%d] (%q): remove requires path (use shorthand `remove: /path` or full `remove: { path: /path }`)", phase, i, t.Name)
+		}
+		if t.User != nil {
+			if t.User.Name == "" {
+				return fmt.Errorf("%s[%d] (%q): user requires name (use shorthand `user: app` or full `user: { name: app }`)", phase, i, t.Name)
+			}
+			switch t.User.State {
+			case "", "present", "absent":
+			default:
+				return fmt.Errorf("%s[%d] (%q): user state must be 'present' or 'absent', got %q", phase, i, t.Name, t.User.State)
+			}
+			if t.User.State == "absent" && (t.User.Shell != "" || t.User.Home != "" || t.User.CreateHome || len(t.User.Groups) > 0) {
+				return fmt.Errorf("%s[%d] (%q): user state=absent rejects shell/home/create_home/groups (they only matter on create)", phase, i, t.Name)
+			}
+		}
+		if t.Download != nil {
+			if t.Download.URL == "" || t.Download.Dst == "" {
+				return fmt.Errorf("%s[%d] (%q): download requires both url and dst", phase, i, t.Name)
+			}
+			if t.Download.Mode != "" {
+				if _, err := strconv.ParseUint(t.Download.Mode, 8, 32); err != nil {
+					return fmt.Errorf("%s[%d] (%q): download mode %q is not a valid octal string", phase, i, t.Name, t.Download.Mode)
+				}
+			}
+			if t.Download.Sha256 != "" && len(t.Download.Sha256) != 64 {
+				return fmt.Errorf("%s[%d] (%q): download sha256 must be 64 hex chars (sha-256 digest), got %d", phase, i, t.Name, len(t.Download.Sha256))
+			}
 		}
 		if t.Apt != nil {
 			if len(t.Apt.Name) == 0 && !t.Apt.UpdateCache {
@@ -375,8 +407,8 @@ func validateTasks(phase string, tasks []Task) error {
 				return fmt.Errorf("%s[%d] (%q): docker_login location must be one of both/local/remote, got %q", phase, i, t.Name, t.DockerLogin.Location)
 			}
 		}
-		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil || t.Mkdir != nil || t.Symlink != nil || t.Remove != nil) {
-			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template/mkdir/symlink/remove (each one stats its path and decides skip-vs-apply on its own)", phase, i, t.Name)
+		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil || t.Mkdir != nil || t.Symlink != nil || t.Remove != nil || t.Download != nil) {
+			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template/mkdir/symlink/remove/download (each one stats its path and decides skip-vs-apply on its own)", phase, i, t.Name)
 		}
 	}
 	return nil

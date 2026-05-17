@@ -261,6 +261,8 @@ each below:
 | [`mkdir`](#mkdir) | remote | Create directory; reconcile mode/owner/group | `path` |
 | [`symlink`](#symlink) | remote | Create / update a symbolic link | `src`, `dst` |
 | [`remove`](#remove) | remote | Delete a path (file / dir / symlink), idempotent | `path` |
+| [`user`](#user) | remote | Create / delete a system user; reconcile supplementary groups | `name` |
+| [`download`](#download) | remote | HTTP GET → file on the remote, optional sha256 verification | `url`, `dst` |
 | [`apt`](#apt) | remote | Install / remove Debian packages | `name` (or `update_cache: true`) |
 | [`service`](#service) | remote | Manage a systemd or supervisor unit | `name` |
 | [`docker_install`](#docker_install) | remote | Install Docker Engine via `get.docker.com` | — |
@@ -273,7 +275,7 @@ Common keys every task may carry:
 | Key | Type | Applies to | Effect |
 |---|---|---|---|
 | `name` | string | every type | Human-readable label shown in CLI output (`▶ <name> (id)`). Defaults to `task #N`. |
-| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove`** — those each stat their own path and decide skip-vs-apply on their own. |
+| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login`, `user` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove` / `download`** — those each stat their own path and decide skip-vs-apply on their own. |
 | `use` | `<dep>/<module_path>` | (special) | Splice a module from a `deps:` entry at this position. Mutually exclusive with the primitives above. See [external-rulebooks.md](external-rulebooks.md). |
 
 Status semantics (what each task can return in events):
@@ -438,6 +440,92 @@ Idempotency:
 
 `recursive: false` is the default specifically to avoid surprising `rm
 -rf` accidents from a typo'd path — opt into it explicitly.
+
+### `user`
+
+Create or delete a system user on the remote. MVP scope is "exists or
+not" — we do not reconcile shell, home directory, or uid on an
+existing user (those changes have nasty failure modes for running
+services that already own files under the old uid). Supplementary
+groups ARE reconciled: adding a new group to the rulebook attaches it
+on the next run via `usermod -aG`.
+
+```yaml
+# Shorthand — create system user "app" with /usr/sbin/nologin
+- user: app
+
+# Full form
+- user:
+    name: app
+    shell: /bin/false               # default /usr/sbin/nologin
+    home: /var/lib/app              # optional; passed as --home-dir
+    create_home: true               # only meaningful with home: ; pairs with --create-home
+    groups: [docker, ssl-cert]      # supplementary groups, reconciled each run
+    state: present                  # present (default) | absent
+```
+
+Idempotency:
+
+- **`state: present`**
+  - Absent → `useradd -r [--shell] [--home-dir] [--create-home] [--groups]` → `changed`.
+  - Present + all requested supplementary groups already attached → `skipped`.
+  - Present + missing supplementary groups → `usermod -aG <missing>` → `changed`.
+- **`state: absent`**
+  - Present → `userdel -r` → `changed`.
+  - Absent → `skipped`.
+
+Always passes `-r` (creates a system user). For interactive users,
+drop down to `command:`. Shell / home / create_home / groups are
+ignored when `state: absent` (validated at parse time).
+
+Groups must already exist on the target. There's no `group:` task yet
+— if you need one, prepare it via `command: "getent group docker ||
+groupadd -r docker"` before the `user:` task.
+
+### `download`
+
+HTTP GET a URL into a file on the remote. Idempotency is driven by the
+optional `sha256:` field — recommend pinning it for any non-trivial
+use so a moving target (release "latest") never gets silently re-
+fetched.
+
+```yaml
+# Public URL, sha pinned (recommended)
+- download:
+    url: https://github.com/foo/bar/releases/download/v1.2.3/bar-linux-amd64
+    dst: /usr/local/bin/bar
+    mode: "0755"                    # default 0644
+    sha256: "abc123..."             # optional but recommended (64 hex chars)
+
+# Private endpoint via Authorization header
+- download:
+    url: "https://api.example.com/internal/release.tgz"
+    dst: /tmp/release.tgz
+    headers:
+      Authorization: "token {{ .gh_token }}"
+      X-Trace-Id: "axup-{{ .git_short_sha }}"
+```
+
+Idempotency:
+
+- **Absent** → fetch → write atomically (`<dst>.download.tmp` + rename)
+  → optional `sha256` verification → chmod → `changed`.
+- **Present + `sha256` set + matches on-disk file** → `skipped` (no
+  network round-trip).
+- **Present + `sha256` set + on-disk mismatch** → re-fetch and
+  overwrite → `changed`.
+- **Present + no `sha256`** → `skipped` (trust the existing file; doc
+  recommends pinning for non-trivial use).
+- **Present + content matches but mode drifted** → `chmod` only →
+  `changed`.
+
+Headers are templated through `vars:` like everywhere else, so secrets
+can come via inventory host vars or `--vars file.yaml` rather than
+being baked into the rulebook.
+
+The agent uses `crypto/tls` for HTTPS (no `curl`/`wget` dependency on
+the remote). Default timeout 10 minutes. Mode default 0644. Parent dir
+of `dst` is auto-created.
 
 ### `apt`
 
@@ -605,6 +693,8 @@ tasks:
 - `mkdir:` is missing `path:`, or has a non-octal `mode:`
 - `symlink:` is missing `src:` or `dst:`
 - `remove:` is missing `path:`
+- `user:` is missing `name:`, has an invalid `state:`, or sets shell/home/groups with `state: absent`
+- `download:` is missing `url:` or `dst:`, has a non-octal `mode:`, or has a `sha256:` that isn't 64 hex chars
 - `apt:` is missing `name:`, or has an invalid `state:`
 - `service:` is missing `name:`, or has an invalid `state:` / `provider:`,
   or sets `enabled:` with `provider: supervisor`
