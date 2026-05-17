@@ -16,6 +16,12 @@
       "description": "Default template variables. Per-host inventory vars, --vars file, and git auto-vars (git_sha, git_short_sha, git_branch, git_dirty) override these.",
       "additionalProperties": true
     },
+    "history": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50,
+      "description": "Per-file rollback history depth. When >0, copy/template archive the previous body on each overwrite; `axup rollback` restores from the chain; `axup history clear` wipes it. 0 (default) disables capture."
+    },
     "deps": {
       "type": "array",
       "description": "External rulebook dependencies fetched via git, locked in axup.lock.",
@@ -84,7 +90,7 @@
     }
   },
   "patternProperties": {
-    "^(?!name$|vars$|deps$|secrets$|tasks$|services$)[a-z][a-z0-9_-]*$": {
+    "^(?!name$|vars$|deps$|secrets$|tasks$|services$|history$|status$|logs$|rollback$)[a-z][a-z0-9_-]*$": {
       "type": "array",
       "description": "A phase — runnable via `axup run <name>`. Names `bootstrap` and `deploy` get the dedicated `axup bootstrap` / `axup deploy` subcommands.",
       "items": { "$ref": "#/$defs/task" }
@@ -104,17 +110,25 @@
     },
     "task": {
       "type": "object",
-      "description": "Exactly one of: command, copy, template, apt, service, docker_install, docker_compose, docker_build, docker_login, use.",
+      "description": "Exactly one of: command, copy, template, mkdir, symlink, remove, user, group, chmod, chown, download, apt, service, docker_install, docker_compose, docker_build, docker_login, use.",
       "properties": {
         "name": { "type": "string", "description": "Human-readable label shown in CLI output." },
         "when_changed": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Run only if any of these remote paths changed earlier in this phase. Invalid on copy/template (they have built-in sha-diff)."
+          "description": "Run only if any of these remote paths changed earlier in this phase. Invalid on copy/template/mkdir/symlink/remove/chmod/chown/download (each one stats its path and decides skip-vs-apply on its own)."
         },
         "command": { "type": "string", "description": "Shell command run via /bin/sh -c on the remote. Always reports status=changed unless when_changed gates it." },
         "copy": { "$ref": "#/$defs/copy" },
         "template": { "$ref": "#/$defs/template" },
+        "mkdir": { "$ref": "#/$defs/mkdir" },
+        "symlink": { "$ref": "#/$defs/symlink" },
+        "remove": { "$ref": "#/$defs/remove" },
+        "user": { "$ref": "#/$defs/user" },
+        "group": { "$ref": "#/$defs/group" },
+        "chmod": { "$ref": "#/$defs/chmod" },
+        "chown": { "$ref": "#/$defs/chown" },
+        "download": { "$ref": "#/$defs/download" },
         "apt": { "$ref": "#/$defs/apt" },
         "service": { "$ref": "#/$defs/service" },
         "docker_install": { "$ref": "#/$defs/dockerInstall" },
@@ -212,6 +226,126 @@
         { "required": ["tag"], "not": { "required": ["tags"] } },
         { "required": ["tags"], "not": { "required": ["tag"] } }
       ],
+      "additionalProperties": false
+    },
+    "mkdir": {
+      "description": "Create a directory on the remote (always mkdir -p). Mode/owner/group are reconciled only when explicitly set — omitted attributes use 0755 on create and are left alone on existing dirs. Shorthand: `mkdir: /path` is sugar for `mkdir: { path: /path }`.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string" },
+            "mode": { "type": "string", "pattern": "^0?[0-7]{3,4}$", "description": "Octal mode, e.g. '0755'." },
+            "owner": { "type": "string", "description": "Username; resolved on the remote via /etc/passwd." },
+            "group": { "type": "string", "description": "Group name; resolved via /etc/group." }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "symlink": {
+      "type": "object",
+      "required": ["src", "dst"],
+      "description": "Create/update a symbolic link. Idempotent: skipped when dst already points at src.",
+      "properties": {
+        "src": { "type": "string", "description": "Target the link points TO." },
+        "dst": { "type": "string", "description": "The symlink path itself." },
+        "force": { "type": "boolean", "default": true, "description": "Replace an existing regular file or directory at dst. Default true matches `ln -sfn`." }
+      },
+      "additionalProperties": false
+    },
+    "remove": {
+      "description": "Delete a path. Idempotent — absent → skipped. Shorthand: `remove: /path` is sugar for `remove: { path: /path }`.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["path"],
+          "properties": {
+            "path": { "type": "string" },
+            "recursive": { "type": "boolean", "default": false, "description": "Required for non-empty directories. Default false to avoid `rm -rf` accidents." }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "user": {
+      "description": "Create or delete a system user. MVP scope: exists-or-not + supplementary-group reconciliation. Shorthand: `user: app` is sugar for `user: { name: app }`.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "shell": { "type": "string", "description": "Login shell. Default /usr/sbin/nologin." },
+            "home": { "type": "string", "description": "Optional home directory. Passed as --home-dir." },
+            "create_home": { "type": "boolean", "default": false, "description": "Pair with home: to actually mkdir it (--create-home)." },
+            "groups": { "type": "array", "items": { "type": "string" }, "description": "Supplementary groups. Reconciled via usermod -aG each run." },
+            "state": { "enum": ["present", "absent"], "default": "present" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "group": {
+      "description": "Create or delete a system group. Shorthand: `group: docker` is sugar for `group: { name: docker }`.",
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "state": { "enum": ["present", "absent"], "default": "present" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "chmod": {
+      "type": "object",
+      "required": ["path", "mode"],
+      "description": "Set POSIX mode on an existing path. Idempotent — only chmod's when current mode differs.",
+      "properties": {
+        "path": { "type": "string" },
+        "mode": { "type": "string", "pattern": "^0?[0-7]{3,4}$" }
+      },
+      "additionalProperties": false
+    },
+    "chown": {
+      "type": "object",
+      "required": ["path"],
+      "description": "Set owner/group on an existing path. At least one of owner/group is required.",
+      "properties": {
+        "path": { "type": "string" },
+        "owner": { "type": "string" },
+        "group": { "type": "string" },
+        "recursive": { "type": "boolean", "default": false, "description": "Walk the tree with chown -RP semantics (Lchown — never follows symlinks)." }
+      },
+      "anyOf": [
+        { "required": ["owner"] },
+        { "required": ["group"] }
+      ],
+      "additionalProperties": false
+    },
+    "download": {
+      "type": "object",
+      "required": ["url", "dst"],
+      "description": "HTTP GET → file on the remote. Optional sha256 verification; without it an existing file is trusted.",
+      "properties": {
+        "url": { "type": "string", "description": "HTTP / HTTPS URL." },
+        "dst": { "type": "string" },
+        "mode": { "type": "string", "pattern": "^0?[0-7]{3,4}$", "description": "Default 0644." },
+        "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$", "description": "Hex digest. Pinning is recommended." },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Custom HTTP headers (e.g. Authorization). Values are templated through rb.Vars."
+        }
+      },
       "additionalProperties": false
     },
     "dockerLogin": {

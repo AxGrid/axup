@@ -225,8 +225,12 @@ Touch all of:
    against `root@cert2.axgrid.com` (see [memory: test_server](/Users/zed/.claude/projects/-Users-zed-GoLang-deploy/memory/test_server.md)).
 
 10. **Docs** — append the new type to [doc/rulebook-reference.md](doc/rulebook-reference.md)
-    with a YAML example and status semantics. Update the README's "9 task
-    primitives" line to the new count.
+    with a YAML example and status semantics; add a row to the quick-
+    reference table at the top of "Task types"; if it has a sha/stat-based
+    skip, list it in the `when_changed` rejection set. Update [schemas/rulebook.schema.json](schemas/rulebook.schema.json)
+    (new `$ref` in the `task` definition + a new `$defs/<name>` block) so
+    IDE autocomplete picks it up. Bump README's "Seventeen task primitives"
+    headline.
 
 ## Conventions
 

@@ -223,8 +223,14 @@ Full auth surface lives in [cli-reference.md](cli-reference.md#auth-flags).
 
 ## Where to go next
 
-- Add more task types (apt packages, supervisor processes, copying files):
+- All 17 task primitives — files (copy, template, mkdir, symlink, remove,
+  chmod, chown, download), identity (user, group), packages (apt),
+  services (systemd, supervisor), docker (install, build, compose, login),
+  and shell commands — with examples:
   [rulebook-reference.md](rulebook-reference.md)
+- Roll back the last N versions of every tracked file with `axup rollback`
+  (opt-in via `history: N` at the top of the rulebook):
+  [rulebook-reference.md](rulebook-reference.md#rollback-history-history)
 - Manage multiple servers from one rulebook with `inventory.yaml`:
   [inventory-multi-host.md](inventory-multi-host.md)
 - Build and push your own Docker images from the same rulebook:

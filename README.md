@@ -15,7 +15,7 @@
 
 `axup` reads a YAML rulebook, opens an SSH connection to your server(s), uploads a small embedded agent into `/tmp`, and streams a plan of tasks to it: install packages, render templates, write configs, manage services, bring up Docker Compose stacks, build and push images, and so on. State (sha256 hashes of every managed file) lives on the remote, so re-runs only touch what actually changed.
 
-Compared to Ansible: no Python on either side, no roles/handlers ceremony, two built-in verbs (`bootstrap` and `deploy`) plus `run <phase>` for any custom phase you declare, and everything that isn't a task is just one of nine well-defined task types.
+Compared to Ansible: no Python on either side, no roles/handlers ceremony, two built-in verbs (`bootstrap` and `deploy`) plus `run <phase>` for any custom phase you declare, and everything that isn't a task is just one of seventeen well-defined task types.
 
 ## Quick start
 
