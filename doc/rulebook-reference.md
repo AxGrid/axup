@@ -262,6 +262,7 @@ each below:
 | [`symlink`](#symlink) | remote | Create / update a symbolic link | `src`, `dst` |
 | [`remove`](#remove) | remote | Delete a path (file / dir / symlink), idempotent | `path` |
 | [`user`](#user) | remote | Create / delete a system user; reconcile supplementary groups | `name` |
+| [`group`](#group) | remote | Create / delete a system group | `name` |
 | [`download`](#download) | remote | HTTP GET → file on the remote, optional sha256 verification | `url`, `dst` |
 | [`apt`](#apt) | remote | Install / remove Debian packages | `name` (or `update_cache: true`) |
 | [`service`](#service) | remote | Manage a systemd or supervisor unit | `name` |
@@ -275,7 +276,7 @@ Common keys every task may carry:
 | Key | Type | Applies to | Effect |
 |---|---|---|---|
 | `name` | string | every type | Human-readable label shown in CLI output (`▶ <name> (id)`). Defaults to `task #N`. |
-| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login`, `user` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove` / `download`** — those each stat their own path and decide skip-vs-apply on their own. |
+| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login`, `user`, `group` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove` / `download`** — those each stat their own path and decide skip-vs-apply on their own. |
 | `use` | `<dep>/<module_path>` | (special) | Splice a module from a `deps:` entry at this position. Mutually exclusive with the primitives above. See [external-rulebooks.md](external-rulebooks.md). |
 
 Status semantics (what each task can return in events):
@@ -478,9 +479,35 @@ Always passes `-r` (creates a system user). For interactive users,
 drop down to `command:`. Shell / home / create_home / groups are
 ignored when `state: absent` (validated at parse time).
 
-Groups must already exist on the target. There's no `group:` task yet
-— if you need one, prepare it via `command: "getent group docker ||
-groupadd -r docker"` before the `user:` task.
+Groups must already exist on the target. Use the [`group`](#group)
+task before any `user:` that references them via `groups:`.
+
+### `group`
+
+Create or delete a system group on the remote. Mirrors [`user`](#user)'s
+MVP scope — exists-or-not, no gid pinning, no rename. Always uses
+`-r` (system group) on create.
+
+```yaml
+# Shorthand
+- group: docker
+
+# Full form
+- group:
+    name: app
+    state: present                  # present (default) | absent
+```
+
+Idempotency:
+
+- **`state: present`** — present → `skipped`; absent → `groupadd -r` →
+  `changed`.
+- **`state: absent`** — present → `groupdel` → `changed`; absent →
+  `skipped`.
+
+Typical pattern: declare every group your services need at the top of
+`bootstrap:`, then `user: { name: ..., groups: [...] }` further down
+the file picks them up.
 
 ### `download`
 
@@ -694,6 +721,7 @@ tasks:
 - `symlink:` is missing `src:` or `dst:`
 - `remove:` is missing `path:`
 - `user:` is missing `name:`, has an invalid `state:`, or sets shell/home/groups with `state: absent`
+- `group:` is missing `name:` or has an invalid `state:`
 - `download:` is missing `url:` or `dst:`, has a non-octal `mode:`, or has a `sha256:` that isn't 64 hex chars
 - `apt:` is missing `name:`, or has an invalid `state:`
 - `service:` is missing `name:`, or has an invalid `state:` / `provider:`,

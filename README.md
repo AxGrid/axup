@@ -36,7 +36,7 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 
 ## Highlights
 
-- **Fourteen task primitives**: `command`, `copy`, `template`, `mkdir`, `symlink`, `remove`, `user`, `download`, `apt`, `service` (systemd + supervisor), `docker_install`, `docker_build`, `docker_compose` (with `wait: true` for healthcheck-gated readiness), `docker_login`
+- **Fifteen task primitives**: `command`, `copy`, `template`, `mkdir`, `symlink`, `remove`, `user`, `group`, `download`, `apt`, `service` (systemd + supervisor), `docker_install`, `docker_build`, `docker_compose` (with `wait: true` for healthcheck-gated readiness), `docker_login`
 - **Arbitrary phases**: any top-level key in the rulebook besides the reserved ones becomes a phase — run `bootstrap:` / `deploy:` / `deploy_crash:` / `migrate:` / … via `axup run <phase>`
 - **`axup logs <svc>...`**: tail per-service logs over SSH with `[host]` prefix, parallel across `--group`. Catalogs live under a `services:` block in the rulebook.
 - **External vars file**: `--vars file.yaml` merges a per-env dict into rulebook vars (precedence: inventory > --vars > git auto > rulebook defaults).

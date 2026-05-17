@@ -240,6 +240,9 @@ func validateTasks(phase string, tasks []Task) error {
 		if t.User != nil {
 			set++
 		}
+		if t.Group != nil {
+			set++
+		}
 		if t.Download != nil {
 			set++
 		}
@@ -267,7 +270,7 @@ func validateTasks(phase string, tasks []Task) error {
 			return fmt.Errorf("%s[%d] (%q): use %q did not resolve — declare the dep in deps:[]", phase, i, t.Name, t.Use)
 		}
 		if set == 0 {
-			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/download/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
+			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/group/download/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
 		}
 		if set > 1 {
 			return fmt.Errorf("%s[%d] (%q): multiple operations set; choose exactly one", phase, i, t.Name)
@@ -307,6 +310,16 @@ func validateTasks(phase string, tasks []Task) error {
 			}
 			if t.User.State == "absent" && (t.User.Shell != "" || t.User.Home != "" || t.User.CreateHome || len(t.User.Groups) > 0) {
 				return fmt.Errorf("%s[%d] (%q): user state=absent rejects shell/home/create_home/groups (they only matter on create)", phase, i, t.Name)
+			}
+		}
+		if t.Group != nil {
+			if t.Group.Name == "" {
+				return fmt.Errorf("%s[%d] (%q): group requires name (use shorthand `group: docker` or full `group: { name: docker }`)", phase, i, t.Name)
+			}
+			switch t.Group.State {
+			case "", "present", "absent":
+			default:
+				return fmt.Errorf("%s[%d] (%q): group state must be 'present' or 'absent', got %q", phase, i, t.Name, t.Group.State)
 			}
 		}
 		if t.Download != nil {

@@ -173,6 +173,8 @@ func executeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return runRemoveTask(ctx, t)
 	case protocol.TaskUser:
 		return runUserTask(ctx, t)
+	case protocol.TaskGroup:
+		return runGroupTask(ctx, t)
 	case protocol.TaskDownload:
 		return runDownloadTask(ctx, t)
 	case protocol.TaskApt:

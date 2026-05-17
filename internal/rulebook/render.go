@@ -149,6 +149,13 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 			t.User.Groups[i] = s
 		}
 	}
+	if t.Group != nil {
+		if s, err := renderString(t.Group.Name, vars); err == nil {
+			t.Group.Name = s
+		} else {
+			return err
+		}
+	}
 	if t.Download != nil {
 		if s, err := renderString(t.Download.URL, vars); err == nil {
 			t.Download.URL = s

@@ -481,6 +481,18 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 				UserState:      state,
 			})
 
+		case "group":
+			state := t.Group.State
+			if state == "" {
+				state = "present"
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:       protocol.TaskGroup,
+				GroupName:  t.Group.Name,
+				GroupState: state,
+			})
+
 		case "download":
 			mode := t.Download.Mode
 			if mode == "" {

@@ -32,6 +32,7 @@ const (
 	TaskSymlink       = "symlink"
 	TaskRemove        = "remove"
 	TaskUser          = "user"
+	TaskGroup         = "group"
 	TaskDownload      = "download"
 	TaskApt           = "apt"
 	TaskService       = "service"
@@ -104,6 +105,10 @@ type Task struct {
 	UserCreateHome bool     `json:"user_create_home,omitempty"` // pass --create-home / --no-create-home
 	UserGroups     []string `json:"user_groups,omitempty"`      // supplementary groups, reconciled via usermod -aG each run
 	UserState      string   `json:"user_state,omitempty"`       // present (default) | absent
+
+	// group:
+	GroupName  string `json:"group_name,omitempty"`
+	GroupState string `json:"group_state,omitempty"` // present (default) | absent
 
 	// download:
 	DownloadURL     string            `json:"download_url,omitempty"`

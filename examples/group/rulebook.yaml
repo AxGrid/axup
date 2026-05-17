@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: group-demo
+
+bootstrap:
+  # group: shorthand
+  - group: axupgrp
+
+  # group: full form (state defaults to present)
+  - group:
+      name: axupgrp-other
+
+  # user that depends on those groups existing first
+  - user:
+      name: axupuser
+      groups: [axupgrp, axupgrp-other]

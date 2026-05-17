@@ -190,6 +190,7 @@ type Task struct {
 	Symlink       *SymlinkSpec       `yaml:"symlink,omitempty"`
 	Remove        *RemoveSpec        `yaml:"remove,omitempty"`
 	User          *UserSpec          `yaml:"user,omitempty"`
+	Group         *GroupSpec         `yaml:"group,omitempty"`
 	Download      *DownloadSpec      `yaml:"download,omitempty"`
 	Apt           *AptSpec           `yaml:"apt,omitempty"`
 	Service       *ServiceSpec       `yaml:"service,omitempty"`
@@ -307,6 +308,34 @@ func (u *UserSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*u = UserSpec(a)
+	return nil
+}
+
+// GroupSpec creates or deletes a system group on the remote. Mirrors
+// UserSpec's MVP scope — exists-or-not, no attribute reconciliation
+// (gid pinning has the same destructive-failure modes as uid pinning
+// for users). Always passes `-r` (system group) on create.
+//
+// Shorthand `group: docker` is sugar for `group: { name: docker }`.
+type GroupSpec struct {
+	Name  string `yaml:"name"`
+	State string `yaml:"state,omitempty"` // present (default) | absent
+}
+
+func (g *GroupSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		g.Name = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("group: expected string name or mapping, got %s", nodeKind(node.Kind))
+	}
+	type alias GroupSpec
+	var a alias
+	if err := node.Decode(&a); err != nil {
+		return err
+	}
+	*g = GroupSpec(a)
 	return nil
 }
 
@@ -450,6 +479,8 @@ func (t Task) Kind() string {
 		return "remove"
 	case t.User != nil:
 		return "user"
+	case t.Group != nil:
+		return "group"
 	case t.Download != nil:
 		return "download"
 	case t.Apt != nil:
