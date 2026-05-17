@@ -17,6 +17,8 @@ Top-level commands:
 | `axup run <phase>` | Run any named phase (incl. custom phases like `deploy_crash`, `migrate`) |
 | `axup logs <svc>...` | Tail logs of one or more services declared in `services:` |
 | `axup status` | Report each host's recorded state and any drift, read-only |
+| `axup rollback` | Restore tracked files from their per-host history chain |
+| `axup history clear` | Wipe every tracked file's history chain on the target host(s) |
 | `axup init` | Scaffold a stub `rulebook.yaml` in the current directory |
 | `axup deps tidy` | Resolve `deps:` to fresh SHAs and rewrite `axup.lock` |
 | `axup deps verify` | Check that `axup.lock` matches the declared deps |
@@ -143,10 +145,10 @@ axup run axup --check --group prod        # equivalent to `axup deploy --check`
 ```
 
 Phase names must match `^[a-z][a-z0-9_-]*$` and cannot be `status` /
-`tasks` / `services` / `logs` (CLI-reserved). All phases of one
-rulebook share `~/.axup-state/<name>/state.json` on the remote — a
-file written by `bootstrap` is "in sync" when a later `deploy_crash`
-references the same path.
+`tasks` / `services` / `logs` / `history` / `rollback` (CLI-reserved).
+All phases of one rulebook share `~/.axup-state/<name>/state.json` on
+the remote — a file written by `bootstrap` is "in sync" when a later
+`deploy_crash` references the same path.
 
 Local flags: same as `axup bootstrap` / `axup deploy`
 (`--host`, `--group`, `--rulebook`, `--vars`).
@@ -209,10 +211,116 @@ status:
 ```sh
 axup status --host root@server
 axup status --group prod
+axup status --history --group prod         # also print the per-file history chain
 ```
 
 Same flags as `bootstrap` / `axup` (minus phase-related ones). State is
 never rewritten in this mode.
+
+Local flags:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--host STR` | — | Target host: `user@addr[:port]` or inventory host name. |
+| `--group STR` | — | Inventory group. Mutex with `--host`. |
+| `--rulebook PATH` | `rulebook.yaml` | Path to the rulebook YAML. |
+| `--inventory PATH` | — | Optional inventory YAML override (may be age-encrypted). |
+| `--history` | `false` | Also print the per-file rollback history chain. Only meaningful when the rulebook sets `history: N > 0` and at least one deploy has overwritten a tracked file. |
+
+`--history` output looks like:
+
+```
+[host]   ✓ status=in_sync path=/opt/foo/bin
+[host]     msg: sha 2081df3e641e mode 0755 applied_at 2026-05-17T08:24:08Z
+[host]     history: (2 versions, newest first)
+[host]       [1]  sha=d6aa4fe25fa3 mode=0755 recorded_at=2026-05-17T08:24:08Z phase=deploy
+[host]       [2]  sha=6ae2af4ee752 mode=0755 recorded_at=2026-05-17T08:24:06Z phase=deploy
+```
+
+## `axup rollback`
+
+```
+axup rollback [flags]
+```
+
+Restores every tracked `copy:` / `template:` file from its on-host
+history chain. Requires the rulebook to have set `history: N > 0` AND
+at least one prior deploy that overwrote the file (the very first deploy
+produces no history — there's nothing to archive).
+
+**Reset semantics.** Rolled-over entries are *dropped* after restore,
+including the version that was current before. "Go back to version N"
+means version N+1 is gone and no longer reachable as a future rollback
+target. A second `axup rollback --step 1` goes one step further back,
+not forward.
+
+Local flags:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--host STR` | — | Target host: `user@addr[:port]` or inventory host name. |
+| `--group STR` | — | Inventory group. Mutex with `--host`. |
+| `--rulebook PATH` | `rulebook.yaml` | Path to the rulebook YAML. |
+| `--inventory PATH` | — | Optional inventory YAML override. |
+| `--step N` | `1` | How many versions back to restore (1 = previous version). |
+| `--task PATH` | — | Restrict the rollback to a single tracked path (full dst path, e.g. `/opt/foo/bin`). Without this, every file with a non-empty history is rolled back; files with no history are silently skipped. With this flag set, missing history on the targeted file is an error. |
+| `--yes` | `false` | Skip the interactive confirmation prompt that fires for `--step > 1`. Use in scripts/CI. |
+| `--check` / `--dry-run` | `false` | Preview what would be restored without touching state or files. |
+
+```sh
+# Preview the most recent rollback target
+axup rollback --check --host prod-1
+
+# Actual one-step rollback
+axup rollback --host prod-1
+
+# Multi-step rollback (2 versions back) with confirmation skipped
+axup rollback --step 2 --yes --host prod-1
+
+# Roll back just one file across a whole group
+axup rollback --task /opt/foo/bin --yes --group prod
+
+# Inspect the chain BEFORE deciding which step to pick
+axup status --history --group prod
+```
+
+Per-host behavior in a group fan-out: each host has its own state.json
+and history dir, so rollback succeeds/fails independently per host. A
+host with an empty chain is reported with `summary: skipped=N` rather
+than aborting the others.
+
+## `axup history clear`
+
+```
+axup history clear [flags]
+```
+
+Wipes every tracked file's `History` array in `state.json` and removes
+the per-host history dir (`~/.axup-state/<rulebook>/history/`). This is
+irreversible — after clear, any `axup rollback` will skip every file
+with "no history".
+
+Local flags:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--host STR` | — | Target host. |
+| `--group STR` | — | Inventory group. Mutex with `--host`. |
+| `--rulebook PATH` | `rulebook.yaml` | Path to the rulebook YAML. |
+| `--inventory PATH` | — | Optional inventory YAML override. |
+| `--yes` | `false` | Skip the interactive confirmation prompt. |
+| `--check` / `--dry-run` | `false` | Report what would be wiped without touching anything. |
+
+Typical use: pair with an irreversible deploy (DB migration, on-disk
+format change) where rolling back the previous binary would fail at
+runtime. The previous binary in the history chain is *worse* than no
+history in that case — `axup rollback` would happily restore it and
+then break startup. The recipe is:
+
+```sh
+axup deploy        --host prod-1
+axup history clear --host prod-1 --yes
+```
 
 ## `axup init`
 
@@ -295,6 +403,7 @@ as `axup bootstrap` — see the `--age-key` row above and
 |---|---|
 | `/tmp/axupd-<rand>` | Uploaded agent binary; removed at end of every run |
 | `~/.axup-state/<rulebook-name>/state.json` | sha256 + mode of every managed file (under root's home when sudo is used) |
+| `~/.axup-state/<rulebook-name>/history/<rand>.bak` | Archived previous bodies of `copy:` / `template:` files, kept when the rulebook sets `history: N > 0`. Mode 0600, dir 0700. Removed by `axup history clear` and (per-entry) by eviction when the chain exceeds N. |
 
 ## Wire protocol
 

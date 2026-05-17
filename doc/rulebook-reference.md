@@ -31,6 +31,11 @@ and inline docs on hover.
 ```yaml
 name: my-app                          # required; used as the state-dir name on the remote
 
+history: 3                            # optional; keep the last N versions of every copy/template
+                                      # file on the remote so `axup rollback` can restore them.
+                                      # 0 (default) disables history capture. See "Rollback
+                                      # history" below.
+
 vars:                                 # optional; available as {{ .var_name }} in templates
   app_name: my-app
   port: 8080
@@ -66,9 +71,13 @@ It must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`.
 
 ## Phases
 
-Reserved top-level keys: `name`, `vars`, `deps`, `secrets`, `tasks`
-(module-form only). Everything else is a phase. Phase names must match
-`^[a-z][a-z0-9_-]*$` and cannot be `status` or `tasks` (CLI-reserved).
+Reserved top-level keys (these have their own meaning in the schema and
+are NOT treated as phases): `name`, `vars`, `deps`, `secrets`, `services`,
+`history`, `tasks` (module-form only).
+
+Everything else is a phase. Phase names must match `^[a-z][a-z0-9_-]*$`
+and cannot collide with one of the CLI dispatch words: `status`, `tasks`,
+`services`, `logs`, `history`, `rollback`.
 
 Run any phase via:
 
@@ -139,6 +148,69 @@ per resolved host, runs `tail -n 20 -q -F <paths…>` against the
 resolved files, and streams output prefixed with `[host]`. See
 [cli-reference.md](cli-reference.md) for flags (`-n` / `--tail`,
 `--no-follow`, `--list`).
+
+## Rollback history (`history:`)
+
+Set `history: N` at the top level to make the agent archive the previous
+body of every `copy:` / `template:` file before overwriting it. Up to N
+previous versions are kept under `~/.axup-state/<name>/history/` on each
+remote host, and recorded in `state.json` per file (newest first). N
+must be in the range 0..50; default 0 means history capture is OFF.
+
+```yaml
+name: my-app
+history: 3        # keep last 3 versions per tracked file
+```
+
+What the agent does on every `copy:` / `template:` overwrite:
+
+1. Reads the current on-disk file, writes a copy to
+   `~/.axup-state/<name>/history/<random>.bak` (mode 0600).
+2. Prepends a `HistoryEntry` to `state.json`'s `files["<dst>"].history`
+   array (sha + mode + recorded_at + phase + task_id).
+3. Evicts the oldest entry beyond N and `rm`'s its archive file.
+
+Fresh writes (where the file didn't exist yet) don't produce a history
+entry — there's nothing to archive. No-op runs (when the on-disk file
+already matches the desired sha + mode) also don't archive, but they
+preserve any existing chain.
+
+What you can do with the chain:
+
+| Command | Purpose |
+|---|---|
+| `axup status --history` | Print every file's chain (sha, mode, recorded_at, phase). Read-only. |
+| `axup rollback [--step N] [--task PATH]` | Restore each file from `history[N-1]`. Reset-semantics: rolled-over entries are dropped. |
+| `axup history clear` | Wipe every chain + remove the history dir on each host. Irreversible. |
+
+See [cli-reference.md](cli-reference.md) for the full flag set on each.
+
+### Operational notes
+
+- **Reset semantics on rollback.** Two `axup rollback --step 1` calls go
+  back two versions, not back-then-forward. Documented in the command's
+  `--help`; aligns with how ops "go back to vN" mental-models work.
+- **No history capture for fresh writes.** The very first deploy of a
+  file produces no history (nothing existed to archive). Plan accordingly
+  when scripting "deploy then rollback" smoke tests.
+- **Use `axup history clear` after irreversible deploys.** When a phase
+  ran something that breaks rollback at runtime (DB migration, on-disk
+  format change), the previous binary in history is *worse* than no
+  history — `axup rollback` would happily restore it and then break
+  startup. The standard recipe is:
+  ```
+  axup deploy   --host h --rulebook r
+  axup history clear --host h --rulebook r --yes
+  ```
+- **Disk cost.** Three copies of a 100 MB binary across 5 hosts = 1.5 GB
+  total. Plan capacity, or drop `history:` for projects where individual
+  files are huge.
+- **No retroactive enable.** Setting `history: 3` only affects future
+  overwrites — past writes can't be archived after the fact.
+- **Per-host chains.** Each host has its own `state.json` + history dir,
+  so a multi-host group can have divergent chains (one host's deploy
+  failed and rolled back, others didn't). `axup status --history --group X`
+  prints them side by side prefixed by `[hostname]`.
 
 ## Variables and templating
 
@@ -402,6 +474,7 @@ tasks:
 `axup bootstrap` / `axup deploy` reject the rulebook at parse time if:
 
 - `name:` is missing or fails the regex
+- `history:` is set outside 0..50
 - A task has zero operations or more than one operation
 - `apt:` is missing `name:`, or has an invalid `state:`
 - `service:` is missing `name:`, or has an invalid `state:` / `provider:`,
