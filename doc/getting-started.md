@@ -237,5 +237,8 @@ Full auth surface lives in [cli-reference.md](cli-reference.md#auth-flags).
   the [examples/build](../examples/build) example walks through it end-to-end
 - Encrypt registry passwords / other secrets:
   [secrets.md](secrets.md)
+- Split one project across `mysql/` / `redis/` / `app/` subdirs and
+  splice them back into the orchestrator rulebook via `use: ./mysql`:
+  [local-submodules.md](local-submodules.md)
 - Pull reusable rulebook modules (mysql, redis, supervisor templates) from
-  another repository: [external-rulebooks.md](external-rulebooks.md)
+  another git repository: [external-rulebooks.md](external-rulebooks.md)

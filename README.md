@@ -43,7 +43,8 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 - **Remote state with sha256 diffs**: re-applying a rulebook only touches files whose content or mode actually changed; out-of-band drift is detected
 - **`axup status`**: read-only mode that reports `in_sync` / `drift` / `missing` for every tracked file on every host
 - **`axup bootstrap --check`** (dry-run): see what would change without applying anything
-- **External rulebook modules**: declare `deps:` with `{git, version}`, lock to SHAs, import sub-rulebooks via `use: common/mysql8`
+- **Local submodules**: split one project across per-component subdirs (`mysql/`, `redis/`, `app/`) each with its own phased rulebook + templates; the parent splices them at exact positions via `use: ./mysql` (implicit phase match) or `use: ./mysql/deploy` (explicit). [Docs](doc/local-submodules.md).
+- **External rulebook modules**: declare `deps:` with `{git, version}`, lock to SHAs, import sub-rulebooks via `use: common/mysql8`. [Docs](doc/external-rulebooks.md).
 - **Inventory + multi-host**: optional `inventory.yaml` with named hosts, groups, and per-host vars; `--group prod` fans out in parallel via errgroup
 - **Two encryption backends, auto-routed by extension**: sops-style structural for YAML/JSON/INI/ENV/TOML (leaf values encrypted, keys still readable in PR diffs); whole-file age armor for everything else (binaries, certs, .conf). One `recipients.txt`, one identity-discovery chain, transparent decrypt at deploy time. See [Encryption](#encryption) below.
 - **Auth modes**: SSH key (auto-discover or `--key`), SSH password (`--password` / `--ask-password`), sudo with or without password (`--sudo` / `--sudo-password` / `--ask-sudo-password`)
