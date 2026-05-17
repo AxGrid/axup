@@ -250,9 +250,37 @@ rulebook's defaults. See [inventory-multi-host.md](inventory-multi-host.md).
 
 ## Task types
 
-Every task is one of the following. A task may carry an optional `name:`
-(used in CLI output) and, for non-file tasks, `when_changed:` (a list of
-remote paths that must have been touched this run for the task to fire).
+Quick reference — every task type at a glance, then a detailed section for
+each below:
+
+| Task | Runs on | Purpose | Required fields |
+|---|---|---|---|
+| [`command`](#command) | remote | Shell command via `/bin/sh -c` | `command` |
+| [`copy`](#copy) | remote | Literal file from rulebook dir → remote path | `src`, `dst` |
+| [`template`](#template) | remote | Go template (+ sprig) → remote path | `src`, `dst` |
+| [`apt`](#apt) | remote | Install / remove Debian packages | `name` (or `update_cache: true`) |
+| [`service`](#service) | remote | Manage a systemd or supervisor unit | `name` |
+| [`docker_install`](#docker_install) | remote | Install Docker Engine via `get.docker.com` | — |
+| [`docker_compose`](#docker_compose) | remote | `docker compose up` / `down` / `restarted` / `pulled` | `dir` |
+| [`docker_build`](#docker_build-cli-local) | CLI host | Build image with `docker buildx`, optional `push:` | `context`, one of `tag` / `tags` |
+| [`docker_login`](#docker_login-cli-local-andor-remote) | both (default) / local / remote | `docker login` against a private registry | `registry`, `creds_file` (or inline) |
+
+Common keys every task may carry:
+
+| Key | Type | Applies to | Effect |
+|---|---|---|---|
+| `name` | string | every type | Human-readable label shown in CLI output (`▶ <name> (id)`). Defaults to `task #N`. |
+| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template`** — those have their own sha-diff skip logic and the gate would be redundant. |
+| `use` | `<dep>/<module_path>` | (special) | Splice a module from a `deps:` entry at this position. Mutually exclusive with the primitives above. See [external-rulebooks.md](external-rulebooks.md). |
+
+Status semantics (what each task can return in events):
+
+| Status | Meaning |
+|---|---|
+| `changed` | The task did real work — file written, package installed, service restarted, image built, etc. |
+| `skipped` | The desired state already held — nothing to do. |
+| `error` | The task failed; the per-host run is marked failed but other tasks still run (you'll see the summary line). |
+| `would_change` | Dry-run (`--check`): the task WOULD have done something. |
 
 ### `command`
 
