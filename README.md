@@ -151,7 +151,8 @@ axup version                          # confirm new build
 | [Rulebook reference](doc/rulebook-reference.md) | Every task type and field, with copy-paste-ready YAML |
 | [Inventory & multi-host](doc/inventory-multi-host.md) | `inventory.yaml`, `--host` vs `--group`, per-host vars, parallel runs |
 | [Secrets (age + sops)](doc/secrets.md) | Both backends, recipients, identity discovery, multi-developer setup, per-file recipients |
-| [External rulebooks](doc/external-rulebooks.md) | `deps:`, `use:`, `axup.lock`, module layout, var merge precedence |
+| [Local submodules](doc/local-submodules.md) | Split one project across `mysql/`, `redis/`, … subdirs and splice them into the parent via `use: ./...` |
+| [External rulebooks](doc/external-rulebooks.md) | `deps:`, `use:`, `axup.lock`, module layout, var merge precedence (for git-versioned modules) |
 | [CLI reference](doc/cli-reference.md) | Every command, every flag, every env var |
 
 ## Example projects

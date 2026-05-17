@@ -1,0 +1,8 @@
+name: redis-submodule
+
+vars:
+  redis_port: 6379
+
+bootstrap:
+  - mkdir: /var/lib/local-redis-demo
+  - command: "echo redis bootstrapped on port {{ .redis_port }}"

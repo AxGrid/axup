@@ -1,0 +1,23 @@
+name: mysql-submodule
+
+vars:
+  mysql_port: 3306
+  mysql_data: /var/lib/local-mysql-demo
+
+bootstrap:
+  - mkdir:
+      path: "{{ .mysql_data }}"
+      mode: "0755"
+  - template:
+      src: templates/my.cnf.tmpl
+      dst: /etc/local-mysql-demo.cnf
+      mode: "0644"
+
+deploy:
+  - template:
+      src: templates/my.cnf.tmpl
+      dst: /etc/local-mysql-demo.cnf
+      mode: "0644"
+  - command: "echo mysql redeployed (config sha) ; sha256sum /etc/local-mysql-demo.cnf"
+    when_changed:
+      - /etc/local-mysql-demo.cnf

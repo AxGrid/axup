@@ -152,20 +152,34 @@ func loadInternal(path string, o LoadOptions) (*Rulebook, error) {
 
 	// Resolve deps and inline every `use:` task before we run downstream
 	// validation. From here on the task tree is fully concrete — no further
-	// modules will be loaded.
+	// modules will be loaded. Two flavors of `use:` are handled here:
+	//   - git-dep refs (`use: <dep>/<module>`) — need ctx.depPaths populated
+	//     by deps resolver
+	//   - local refs (`use: ./<path>[/<phase>]`) — resolved relative to
+	//     rb.Dir, work with or without deps[]
+	// Therefore we run expandUseTasks unconditionally; the deps resolver
+	// only fires when deps: is non-empty.
+	var depPaths map[string]string
 	if len(rb.Deps) > 0 {
-		depPaths, err := resolveDepsForLoad(&rb)
+		var err error
+		depPaths, err = resolveDepsForLoad(&rb)
 		if err != nil {
 			return nil, err
 		}
-		visited := map[string]bool{}
-		for name, tasks := range rb.Phases {
-			expanded, err := expandUseTasks(tasks, depPaths, rb.Vars, visited)
-			if err != nil {
-				return nil, fmt.Errorf("phase %q: %w", name, err)
-			}
-			rb.Phases[name] = expanded
+	}
+	for name, tasks := range rb.Phases {
+		ctx := &expandCtx{
+			callerDir:  rb.Dir,
+			depPaths:   depPaths,
+			callerVars: rb.Vars,
+			visited:    map[string]bool{},
+			phase:      name,
 		}
+		expanded, err := expandUseTasks(tasks, ctx)
+		if err != nil {
+			return nil, fmt.Errorf("phase %q: %w", name, err)
+		}
+		rb.Phases[name] = expanded
 	}
 
 	for _, name := range rb.PhaseNames() {

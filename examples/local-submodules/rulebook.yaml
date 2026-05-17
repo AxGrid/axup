@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: local-submodules-demo
+
+vars:
+  app_name: ax-demo
+  mysql_port: 3307                        # overrides mysql/rulebook.yaml's default 3306
+
+bootstrap:
+  - command: "echo === parent bootstrap, before submodules ==="
+
+  # Implicit-phase form — uses the parent current phase (bootstrap)
+  # to pick mysql's bootstrap automatically.
+  - use: ./mysql
+
+  - command: "echo === between submodules ==="
+
+  # Explicit-phase form — `./redis/bootstrap` makes it clear.
+  - use: ./redis/bootstrap
+
+  - command: "echo === after submodules ==="
+
+deploy:
+  - command: "echo === parent deploy ==="
+
+  # Implicit again — this time picks mysql's deploy phase.
+  - use: ./mysql
+
+  - command: "echo === after mysql deploy ==="

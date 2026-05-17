@@ -6,6 +6,13 @@ them. The typical use case is "I have a `common/` repo that knows how to set
 up mysql, redis, nginx; my service repos pull those modules and add their
 own deploy steps on top."
 
+> Looking to split a single project across `mysql/`, `redis/`, … subdirs
+> WITHIN the same repo — no separate git project, no version lock?
+> You want **local submodules** instead:
+> [local-submodules.md](local-submodules.md). Both flavors use the same
+> `use:` task; only the reference syntax differs (`./mysql/...` for
+> local, `<dep>/<module>` for git).
+
 ## TL;DR
 
 In the consuming rulebook:

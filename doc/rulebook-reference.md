@@ -763,13 +763,32 @@ typically age-encrypted (see [secrets.md](secrets.md)). The legacy form with
 inline `username:` + `password:` / `password_file:` / `password_env:` is also
 accepted.
 
+## Reusing tasks across files
+
+There are two ways to split a rulebook and import pieces back together,
+both driven by the `use:` task:
+
+- **Local submodules** — separate subdirectories of the same project
+  (`mysql/`, `redis/`, …), each with its own phased rulebook. The
+  parent splices them at exact positions: `use: ./mysql` (implicit
+  phase match) or `use: ./mysql/deploy` (explicit). See
+  [local-submodules.md](local-submodules.md).
+- **External (git) modules** — versioned, locked, shared across
+  projects via `deps:`. Modules use the single-list `tasks:` form;
+  the parent references them as `use: <dep>/<module_path>`. See
+  [external-rulebooks.md](external-rulebooks.md).
+
+Both forms support per-`use:` `vars:` overrides and rewrite relative
+file paths so spliced tasks see their original module dir.
+
 ## Module form
 
 A rulebook is in **module form** when it has a top-level `tasks:` field
 instead of `bootstrap:` / `deploy:`. Module-form rulebooks are imported via
 `use:` from a parent rulebook; they may NOT declare their own `deps:` and
-they must use `tasks:`, not the phase split. See
-[external-rulebooks.md](external-rulebooks.md) for the import workflow.
+they must use `tasks:`, not the phase split. Module form is only valid
+for external (git) modules — local submodules MUST be phased.
+See [external-rulebooks.md](external-rulebooks.md) for the import workflow.
 
 ```yaml
 # example module: common/mysql8/rulebook.yaml in an external dep
