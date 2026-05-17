@@ -5,6 +5,7 @@ import (
 
 	"github.com/axgrid/axup/internal/runner"
 	"github.com/axgrid/axup/internal/secrets"
+	"github.com/axgrid/axup/internal/transport"
 )
 
 // Version, Commit and BuildDate are set by the linker (-X) from the Makefile
@@ -18,10 +19,11 @@ var (
 )
 
 var (
-	dryRun      bool
-	dryRunDiff  bool
-	noColor     bool
-	ageKeyPaths []string
+	dryRun            bool
+	dryRunDiff        bool
+	noColor           bool
+	ageKeyPaths       []string
+	acceptNewHostKey  bool
 )
 
 var rootCmd = &cobra.Command{
@@ -35,6 +37,7 @@ var rootCmd = &cobra.Command{
 		// Sync persistent flags into packages that read them at run time.
 		runner.NoColor = noColor
 		secrets.KeyPaths = ageKeyPaths
+		transport.AcceptNewHostKeys = acceptNewHostKey
 	},
 }
 
@@ -59,5 +62,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRunDiff, "diff", false, "In dry-run mode, print a unified diff for every copy/template file that would change (implies --check)")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors (auto-disabled when stdout is not a TTY)")
 	rootCmd.PersistentFlags().StringSliceVar(&ageKeyPaths, "age-key", nil, "Path to age identity file (repeatable; overrides auto-discovery; $AXUP_AGE_KEY is a path-list alternative)")
+	rootCmd.PersistentFlags().BoolVar(&acceptNewHostKey, "accept-new-hostkey", false, "Auto-accept and record unknown SSH host keys in ~/.ssh/known_hosts (StrictHostKeyChecking=accept-new); otherwise the user is prompted on a TTY")
 	rootCmd.AddCommand(versionCmd, initCmd, bootstrapCmd, deployCmd, runCmd, logsCmd, depsCmd, secretsCmd, statusCmd, rollbackCmd, historyCmd)
 }
