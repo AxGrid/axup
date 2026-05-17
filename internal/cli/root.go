@@ -59,5 +59,5 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&dryRunDiff, "diff", false, "In dry-run mode, print a unified diff for every copy/template file that would change (implies --check)")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable ANSI colors (auto-disabled when stdout is not a TTY)")
 	rootCmd.PersistentFlags().StringSliceVar(&ageKeyPaths, "age-key", nil, "Path to age identity file (repeatable; overrides auto-discovery; $AXUP_AGE_KEY is a path-list alternative)")
-	rootCmd.AddCommand(versionCmd, initCmd, bootstrapCmd, deployCmd, runCmd, logsCmd, depsCmd, secretsCmd, statusCmd)
+	rootCmd.AddCommand(versionCmd, initCmd, bootstrapCmd, deployCmd, runCmd, logsCmd, depsCmd, secretsCmd, statusCmd, rollbackCmd, historyCmd)
 }

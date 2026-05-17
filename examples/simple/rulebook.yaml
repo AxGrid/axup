@@ -1,5 +1,9 @@
 name: simple-demo
 
+# Keep the last 3 versions of every copy/template file on the remote so
+# `axup rollback` can restore them. Off by default; opt-in per rulebook.
+history: 3
+
 vars:
   app_name: simple-demo
   greeting: "hello, world! (v2)"

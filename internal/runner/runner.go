@@ -36,9 +36,14 @@ type Options struct {
 	Password      string // optional: explicit SSH password
 	Sudo          bool   // wrap agent in sudo -H -S
 	SudoPassword  string // optional: sudo password (empty = expect NOPASSWD)
-	DryRun        bool   // --check / --dry-run: preview only, no changes applied
-	Diff          bool   // --diff: in dry-run mode, agent attaches a unified diff to would_change events for copy/template
-	StatusOnly    bool   // `axup status` mode: skip local tasks, ask agent to report state drift
+	DryRun         bool // --check / --dry-run: preview only, no changes applied
+	Diff           bool // --diff: in dry-run mode, agent attaches a unified diff to would_change events for copy/template
+	StatusOnly     bool   // `axup status` mode: skip local tasks, ask agent to report state drift
+	IncludeHistory bool   // `axup status --history`: ask the agent to attach each file's history chain to its status event
+	Rollback       bool   // `axup rollback` mode: agent restores files from history instead of running tasks
+	RollbackStep   int    // how many versions back to restore (1 = previous)
+	RollbackTask   string // optional: restrict rollback to a single tracked path
+	ClearHistory   bool   // `axup history clear` mode: agent wipes every FileState.History + removes the remote history dir
 }
 
 func Run(opts Options) error {
@@ -58,6 +63,12 @@ func Run(opts Options) error {
 
 	if opts.StatusOnly {
 		return runStatus(opts, hosts, probeRb.Name)
+	}
+	if opts.Rollback {
+		return runRollback(opts, hosts, probeRb.Name)
+	}
+	if opts.ClearHistory {
+		return runHistoryClear(opts, hosts, probeRb.Name)
 	}
 
 	if opts.Phase == "" {
@@ -131,6 +142,7 @@ func Run(opts Options) error {
 				Phase:        opts.Phase,
 				DryRun:       opts.DryRun,
 				Diff:         opts.Diff,
+				KeepHistory:  rbH.History,
 				Tasks:        remoteTasks,
 			}
 			failed, err := runOnHost(opts, host, plan)
@@ -179,9 +191,10 @@ func runStatus(opts Options, hosts []inventory.Resolved, rulebookName string) er
 		host := hosts[i]
 		g.Go(func() error {
 			plan := protocol.Plan{
-				RulebookName: rulebookName,
-				Phase:        "status",
-				StatusOnly:   true,
+				RulebookName:   rulebookName,
+				Phase:          "status",
+				StatusOnly:     true,
+				IncludeHistory: opts.IncludeHistory,
 			}
 			failed, err := runOnHost(opts, host, plan)
 			if err != nil {
@@ -209,6 +222,93 @@ func runStatus(opts Options, hosts []inventory.Resolved, rulebookName string) er
 
 func pickPhaseTasks(rb *rulebook.Rulebook, phase string) []rulebook.Task {
 	return rb.Phase(phase)
+}
+
+// runHistoryClear fans out a ClearHistory plan to every resolved host.
+// Same fan-out shape as runStatus / runRollback. No local tasks, no
+// per-host rulebook reload — the operation only touches each host's
+// state.json + history dir.
+func runHistoryClear(opts Options, hosts []inventory.Resolved, rulebookName string) error {
+	g := new(errgroup.Group)
+	failedAny := struct {
+		mu sync.Mutex
+		v  bool
+	}{}
+	for i := range hosts {
+		host := hosts[i]
+		g.Go(func() error {
+			plan := protocol.Plan{
+				RulebookName: rulebookName,
+				Phase:        "history-clear",
+				DryRun:       opts.DryRun,
+				ClearHistory: true,
+			}
+			failed, err := runOnHost(opts, host, plan)
+			if err != nil {
+				printLine("%s %s\n", red("[error]"), err.Error())
+				failedAny.mu.Lock()
+				failedAny.v = true
+				failedAny.mu.Unlock()
+				return nil
+			}
+			if failed {
+				failedAny.mu.Lock()
+				failedAny.v = true
+				failedAny.mu.Unlock()
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	if failedAny.v {
+		return fmt.Errorf("history clear: one or more hosts had errors")
+	}
+	return nil
+}
+
+// runRollback fans out a Rollback plan to every resolved host. Mirrors
+// runStatus: no local tasks, no per-host rulebook reload (rollback only
+// reads state.json + history archives on the remote). Per-host errors
+// don't abort the fan-out — partial visibility is more useful than none
+// when one host is unreachable.
+func runRollback(opts Options, hosts []inventory.Resolved, rulebookName string) error {
+	g := new(errgroup.Group)
+	failedAny := struct {
+		mu sync.Mutex
+		v  bool
+	}{}
+	for i := range hosts {
+		host := hosts[i]
+		g.Go(func() error {
+			plan := protocol.Plan{
+				RulebookName: rulebookName,
+				Phase:        "rollback",
+				DryRun:       opts.DryRun,
+				Rollback:     true,
+				RollbackStep: opts.RollbackStep,
+				RollbackTask: opts.RollbackTask,
+			}
+			failed, err := runOnHost(opts, host, plan)
+			if err != nil {
+				printLine("%s %s\n", red("[error]"), err.Error())
+				failedAny.mu.Lock()
+				failedAny.v = true
+				failedAny.mu.Unlock()
+				return nil
+			}
+			if failed {
+				failedAny.mu.Lock()
+				failedAny.v = true
+				failedAny.mu.Unlock()
+			}
+			return nil
+		})
+	}
+	_ = g.Wait()
+	if failedAny.v {
+		return fmt.Errorf("rollback: one or more hosts had errors")
+	}
+	return nil
 }
 
 // runOnHost opens SSH, uploads the agent, sends the Plan, streams events.
@@ -479,6 +579,18 @@ func printEvent(tag string, ev protocol.Event) {
 				fmt.Printf("%s       %s\n", coloredTag, paintDiffLine(line))
 			}
 		}
+		if len(ev.History) > 0 {
+			fmt.Printf("%s     %s (%d versions, newest first)\n", coloredTag, gray("history:"), len(ev.History))
+			for i, h := range ev.History {
+				phase := ""
+				if h.Phase != "" {
+					phase = " phase=" + h.Phase
+				}
+				fmt.Printf("%s       %s  sha=%s mode=%s recorded_at=%s%s\n",
+					coloredTag, gray(fmt.Sprintf("[%d]", i+1)),
+					shortSha(h.Sha256), h.Mode, h.RecordedAt, phase)
+			}
+		}
 	case protocol.EventLog:
 		fmt.Printf("%s   %s %s\n", coloredTag, gray("·"), ev.Message)
 	case protocol.EventDone:
@@ -525,5 +637,12 @@ func randSuffix(n int) (string, error) {
 func sha256Hex(b []byte) string {
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
+}
+
+func shortSha(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
 }
 

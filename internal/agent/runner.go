@@ -29,14 +29,78 @@ func Run(in io.Reader, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
-	ctx := newRunCtx(state, plan.DryRun, plan.Diff)
+	ctx := newRunCtx(state, plan.DryRun, plan.Diff, plan.KeepHistory, plan.Phase)
 
 	// Status-only requests bypass task execution entirely. The agent reads
 	// state.json, walks every recorded file, and emits a synthetic task_end
 	// per file describing in_sync / drift / missing. No state.save() either —
 	// status is read-only.
 	if plan.StatusOnly {
-		emitStatus(w, state)
+		emitStatus(w, state, plan.IncludeHistory)
+		w.write(protocol.Event{Type: protocol.EventDone})
+		return nil
+	}
+
+	// Clear-history mode: wipe every FileState.History + remove the
+	// history dir. Dry-run reports what would be cleared without
+	// touching state. No other tasks run.
+	if plan.ClearHistory {
+		total := 0
+		for _, fs := range state.Files {
+			total += len(fs.History)
+		}
+		if plan.DryRun {
+			w.write(protocol.Event{
+				Type:    protocol.EventLog,
+				Status:  protocol.StatusWouldChange,
+				Message: fmt.Sprintf("would clear %d history entries across %d tracked files", total, len(state.Files)),
+			})
+		} else {
+			dropped, err := state.clearAllHistory()
+			if err != nil {
+				w.write(protocol.Event{
+					Type:    protocol.EventLog,
+					Status:  protocol.StatusError,
+					Message: "clear history: " + err.Error(),
+				})
+			} else {
+				w.write(protocol.Event{
+					Type:    protocol.EventLog,
+					Status:  protocol.StatusChanged,
+					Message: fmt.Sprintf("cleared %d history entries across %d tracked files", dropped, len(state.Files)),
+				})
+			}
+			if err := state.save(); err != nil {
+				w.write(protocol.Event{
+					Type:    protocol.EventLog,
+					Status:  protocol.StatusError,
+					Message: "save state: " + err.Error(),
+				})
+			}
+		}
+		w.write(protocol.Event{Type: protocol.EventDone})
+		return nil
+	}
+
+	// Rollback mode: ignore Tasks entirely, walk state.json, restore each
+	// tracked file from its history chain. Dry-run is respected — preview
+	// without touching anything (handled inline in the rollback path).
+	if plan.Rollback {
+		hadError := false
+		if plan.DryRun {
+			emitRollbackPreview(w, state, plan.RollbackStep, plan.RollbackTask)
+		} else {
+			hadError = runRollback(w, state, plan.RollbackStep, plan.RollbackTask)
+			if err := state.save(); err != nil {
+				w.write(protocol.Event{
+					Type:    protocol.EventLog,
+					Status:  protocol.StatusError,
+					Message: "save state: " + err.Error(),
+				})
+				hadError = true
+			}
+		}
+		_ = hadError // surfaces via per-task status=error events; CLI counts them
 		w.write(protocol.Event{Type: protocol.EventDone})
 		return nil
 	}

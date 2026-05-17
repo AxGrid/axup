@@ -41,8 +41,24 @@ type Plan struct {
 	Phase        string `json:"phase"`
 	DryRun       bool   `json:"dry_run,omitempty"`     // when true, handlers preview without applying
 	Diff         bool   `json:"diff,omitempty"`        // dry-run + diff: agent attaches a unified diff to would_change events for copy/template
-	StatusOnly   bool   `json:"status_only,omitempty"` // when true, agent reports state.json drift instead of running tasks
-	Tasks        []Task `json:"tasks"`
+	StatusOnly     bool   `json:"status_only,omitempty"`     // when true, agent reports state.json drift instead of running tasks
+	IncludeHistory bool   `json:"include_history,omitempty"` // only meaningful with StatusOnly: attach the per-file history chain to each status event
+	KeepHistory    int    `json:"keep_history,omitempty"`    // when >0, copy/template archive the previous file body before overwrite and keep this many versions in state.json (for `axup rollback`)
+	Rollback       bool   `json:"rollback,omitempty"`        // when true, agent restores tracked files from their history chain instead of running tasks
+	RollbackStep   int    `json:"rollback_step,omitempty"`   // how far back to restore (1 = previous version); ignored unless Rollback is set
+	RollbackTask   string `json:"rollback_task,omitempty"`   // optional: restrict rollback to a single tracked path (dst path = task_id for copy/template)
+	ClearHistory   bool   `json:"clear_history,omitempty"`   // when true, agent wipes every FileState.History + removes the history/ dir (irreversible)
+	Tasks          []Task `json:"tasks"`
+}
+
+// HistoryItem is the protocol-side view of a stored HistoryEntry — what
+// the CLI needs to render `axup status --history`. We deliberately omit
+// ArchivedPath: that's an agent-internal detail, not user-facing.
+type HistoryItem struct {
+	Sha256     string `json:"sha256"`
+	Mode       string `json:"mode"`
+	RecordedAt string `json:"recorded_at"`
+	Phase      string `json:"phase,omitempty"`
 }
 
 // Task is a single unit of work. The Type field discriminates the union.
@@ -98,13 +114,14 @@ type Task struct {
 }
 
 type Event struct {
-	Type     string `json:"type"`
-	TaskID   string `json:"task_id,omitempty"`
-	Status   string `json:"status,omitempty"`
-	Message  string `json:"message,omitempty"`
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
-	ExitCode int    `json:"exit_code,omitempty"`
-	Path     string `json:"path,omitempty"` // for file-related events: which path was touched
-	Diff     string `json:"diff,omitempty"` // unified diff, attached by agent when Plan.Diff && status=would_change
+	Type     string        `json:"type"`
+	TaskID   string        `json:"task_id,omitempty"`
+	Status   string        `json:"status,omitempty"`
+	Message  string        `json:"message,omitempty"`
+	Stdout   string        `json:"stdout,omitempty"`
+	Stderr   string        `json:"stderr,omitempty"`
+	ExitCode int           `json:"exit_code,omitempty"`
+	Path     string        `json:"path,omitempty"`    // for file-related events: which path was touched
+	Diff     string        `json:"diff,omitempty"`    // unified diff, attached by agent when Plan.Diff && status=would_change
+	History  []HistoryItem `json:"history,omitempty"` // attached by agent when Plan.IncludeHistory && status_only: newest first
 }

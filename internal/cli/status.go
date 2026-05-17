@@ -11,6 +11,7 @@ var (
 	statusGroup     string
 	statusRulebook  string
 	statusInventory string
+	statusHistory   bool
 )
 
 var statusCmd = &cobra.Command{
@@ -27,15 +28,16 @@ is not rewritten.`,
 			return err
 		}
 		return runner.Run(runner.Options{
-			Host:          statusHost,
-			Group:         statusGroup,
-			RulebookPath:  statusRulebook,
-			InventoryPath: statusInventory,
-			KeyPath:       a.KeyPath,
-			Password:      a.Password,
-			Sudo:          a.Sudo,
-			SudoPassword:  a.SudoPassword,
-			StatusOnly:    true,
+			Host:           statusHost,
+			Group:          statusGroup,
+			RulebookPath:   statusRulebook,
+			InventoryPath:  statusInventory,
+			KeyPath:        a.KeyPath,
+			Password:       a.Password,
+			Sudo:           a.Sudo,
+			SudoPassword:   a.SudoPassword,
+			StatusOnly:     true,
+			IncludeHistory: statusHistory,
 		})
 	},
 }
@@ -45,4 +47,5 @@ func init() {
 	statusCmd.Flags().StringVar(&statusGroup, "group", "", "Inventory group name (mutex with --host)")
 	statusCmd.Flags().StringVar(&statusRulebook, "rulebook", "rulebook.yaml", "Path to rulebook.yaml")
 	statusCmd.Flags().StringVar(&statusInventory, "inventory", "", "Optional inventory YAML (overrides default inventory.yaml next to rulebook; may be age-encrypted)")
+	statusCmd.Flags().BoolVar(&statusHistory, "history", false, "Also show the per-file rollback history chain (only meaningful when the rulebook sets `history: N > 0`)")
 }

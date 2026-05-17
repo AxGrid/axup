@@ -14,6 +14,7 @@ type Rulebook struct {
 	Tasks    []Task             `yaml:"tasks,omitempty"`    // module form: a single reusable list
 	Secrets  *SecretsSpec       `yaml:"secrets,omitempty"`  // declarative encrypted-files list
 	Services map[string]Service `yaml:"services,omitempty"` // catalog used by `axup logs <name>`
+	History  int                `yaml:"history,omitempty"`  // how many previous versions per copy/template file to keep on the remote for `axup rollback` (0 = disabled, default; 3 is the typical opt-in)
 
 	// Phases captures every top-level key that isn't one of the reserved
 	// fields above — `bootstrap:`, `deploy:`, `deploy_crash:`, `migrate:`,
@@ -42,6 +43,8 @@ var reservedPhaseNames = map[string]struct{}{
 	"tasks":    {}, // module-form key; lives in its own struct field
 	"services": {}, // catalog block; lives in its own struct field
 	"logs":     {}, // `axup logs` subcommand
+	"history":  {}, // top-level int field (depth of per-file rollback chain)
+	"rollback": {}, // `axup rollback` subcommand
 }
 
 // Phase returns the task list for `name`, or nil if no such phase exists.

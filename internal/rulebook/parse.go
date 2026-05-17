@@ -136,6 +136,13 @@ func loadInternal(path string, o LoadOptions) (*Rulebook, error) {
 		return nil, fmt.Errorf("rulebook %s: %w", path, err)
 	}
 
+	// `history: N` caps the per-file rollback chain on the remote. Cap at
+	// 50 — anything higher is almost certainly a typo (and disk overhead
+	// scales linearly with N × tracked-file size).
+	if rb.History < 0 || rb.History > 50 {
+		return nil, fmt.Errorf("rulebook %s: history: must be 0..50 (got %d)", path, rb.History)
+	}
+
 	// Catch the legacy module-form mistake before downstream code does:
 	// a module rulebook uses `tasks:` and nothing else.
 	if len(rb.Tasks) > 0 && len(rb.Phases) > 0 {

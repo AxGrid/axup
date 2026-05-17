@@ -22,14 +22,23 @@ const defaultFileMode os.FileMode = 0o644
 
 // runCtx is shared across tasks for a single Run invocation.
 type runCtx struct {
-	state   *State
-	changed map[string]bool // paths written this run, keyed by absolute dst path
-	dryRun  bool            // when true, handlers report would_change but don't apply
-	diff    bool            // when true (with dryRun), file handlers attach a unified diff to would_change events
+	state       *State
+	changed     map[string]bool // paths written this run, keyed by absolute dst path
+	dryRun      bool            // when true, handlers report would_change but don't apply
+	diff        bool            // when true (with dryRun), file handlers attach a unified diff to would_change events
+	keepHistory int             // when >0, copy/template archive the previous body before overwrite and keep this many versions per file
+	phase       string          // phase name (bootstrap / deploy / custom); recorded into HistoryEntry.Phase so `axup status --history` can show which phase produced each version
 }
 
-func newRunCtx(s *State, dryRun, diff bool) *runCtx {
-	return &runCtx{state: s, changed: map[string]bool{}, dryRun: dryRun, diff: diff}
+func newRunCtx(s *State, dryRun, diff bool, keepHistory int, phase string) *runCtx {
+	return &runCtx{
+		state:       s,
+		changed:     map[string]bool{},
+		dryRun:      dryRun,
+		diff:        diff,
+		keepHistory: keepHistory,
+		phase:       phase,
+	}
 }
 
 func runCommandTask(ctx *runCtx, t protocol.Task) protocol.Event {
@@ -112,14 +121,23 @@ func runFileTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		desiredSha = sha256Hex(body)
 	}
 
+	prev := ctx.state.Files[t.DstPath]
+
 	if exists && currentSha == desiredSha && currentMode == mode {
 		// Nothing to do; refresh the state row so updated_at advances. In
 		// dry-run we don't mutate state, but the answer is still "skipped".
+		// Preserve any accumulated History — a no-op run must not silently
+		// drop the rollback chain.
 		if !ctx.dryRun {
+			var hist []HistoryEntry
+			if prev != nil {
+				hist = prev.History
+			}
 			ctx.state.Files[t.DstPath] = &FileState{
 				Sha256:    desiredSha,
 				Mode:      modeStr,
-				AppliedAt: ctx.state.Files[t.DstPath].appliedAtOrNow(),
+				AppliedAt: prev.appliedAtOrNow(),
+				History:   hist,
 			}
 		}
 		return protocol.Event{Status: protocol.StatusSkipped, Path: t.DstPath}
@@ -140,6 +158,30 @@ func runFileTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return ev
 	}
 
+	// Archive the current file before overwrite so `axup rollback` can
+	// restore it. Skip when (a) history is disabled (keepHistory==0),
+	// (b) the file doesn't exist yet (fresh write, nothing to archive).
+	// History is preserved verbatim when keepHistory==0 — opting out of
+	// new captures doesn't wipe what's already recorded.
+	var newHistory []HistoryEntry
+	if prev != nil {
+		newHistory = prev.History
+	}
+	if ctx.keepHistory > 0 && exists {
+		archived, err := archiveCurrentFile(ctx.state.RulebookName, t.DstPath)
+		if err != nil {
+			return protocol.Event{Status: protocol.StatusError, Path: t.DstPath, Message: "archive current: " + err.Error()}
+		}
+		newHistory = pushHistory(newHistory, HistoryEntry{
+			Sha256:       currentSha,
+			Mode:         fmtMode(currentMode),
+			ArchivedPath: archived,
+			RecordedAt:   time.Now().UTC().Format(time.RFC3339),
+			Phase:        ctx.phase,
+			TaskID:       t.DstPath,
+		}, ctx.keepHistory)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(t.DstPath), 0o755); err != nil {
 		return protocol.Event{Status: protocol.StatusError, Path: t.DstPath, Message: "mkdir parent: " + err.Error()}
 	}
@@ -152,6 +194,7 @@ func runFileTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		Sha256:    desiredSha,
 		Mode:      modeStr,
 		AppliedAt: time.Now().UTC().Format(time.RFC3339),
+		History:   newHistory,
 	}
 	return protocol.Event{Status: protocol.StatusChanged, Path: t.DstPath}
 }

@@ -12,7 +12,11 @@ import (
 // per tracked file with one of in_sync / drift / missing. A header EventLog
 // carries the rulebook name and the last-applied timestamp so the CLI can
 // render a section title before the per-file rows.
-func emitStatus(w *eventWriter, state *State) {
+//
+// When includeHistory is true (set by Plan.IncludeHistory), each per-file
+// event also carries the per-file history chain in ev.History so the CLI
+// can render a "history:" sub-block for `axup status --history`.
+func emitStatus(w *eventWriter, state *State, includeHistory bool) {
 	w.write(protocol.Event{
 		Type:    protocol.EventLog,
 		Message: fmt.Sprintf("rulebook=%s updated_at=%s files=%d", state.RulebookName, state.UpdatedAt, len(state.Files)),
@@ -55,6 +59,17 @@ func emitStatus(w *eventWriter, state *State) {
 				default:
 					ev.Message = fmt.Sprintf("mode differs: state=%s disk=%s", fs.Mode, fmtMode(curMode))
 				}
+			}
+		}
+		if includeHistory && len(fs.History) > 0 {
+			ev.History = make([]protocol.HistoryItem, 0, len(fs.History))
+			for _, h := range fs.History {
+				ev.History = append(ev.History, protocol.HistoryItem{
+					Sha256:     h.Sha256,
+					Mode:       h.Mode,
+					RecordedAt: h.RecordedAt,
+					Phase:      h.Phase,
+				})
 			}
 		}
 		w.write(ev)
