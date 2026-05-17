@@ -186,6 +186,9 @@ type Task struct {
 	Command       string             `yaml:"command,omitempty"`
 	Copy          *CopySpec          `yaml:"copy,omitempty"`
 	Template      *TemplateSpec      `yaml:"template,omitempty"`
+	Mkdir         *MkdirSpec         `yaml:"mkdir,omitempty"`
+	Symlink       *SymlinkSpec       `yaml:"symlink,omitempty"`
+	Remove        *RemoveSpec        `yaml:"remove,omitempty"`
 	Apt           *AptSpec           `yaml:"apt,omitempty"`
 	Service       *ServiceSpec       `yaml:"service,omitempty"`
 	DockerCompose *DockerComposeSpec `yaml:"docker_compose,omitempty"`
@@ -207,6 +210,82 @@ type CopySpec struct {
 	Src  string `yaml:"src"`
 	Dst  string `yaml:"dst"`
 	Mode string `yaml:"mode,omitempty"`
+}
+
+// MkdirSpec creates a directory on the remote with mode/owner/group. Shorthand
+// `mkdir: /path` is sugar for `mkdir: { path: /path }`. Always recursive
+// (mkdir -p semantics) — parent dirs are created automatically.
+//
+// Idempotency: stat the path. Already-a-dir → diff mode/owner/group and chmod/
+// chown as needed. Already-a-regular-file → error (we never auto-rm). Absent
+// → MkdirAll + chmod + optional chown.
+type MkdirSpec struct {
+	Path  string `yaml:"path"`
+	Mode  string `yaml:"mode,omitempty"`  // octal string, e.g. "0755"; empty = 0755
+	Owner string `yaml:"owner,omitempty"` // optional username; resolved on the remote via /etc/passwd
+	Group string `yaml:"group,omitempty"` // optional group name; resolved via /etc/group
+}
+
+// UnmarshalYAML accepts either a bare path string ("mkdir: /opt/foo") or a
+// mapping with explicit fields. Mirrors SecretFile's two-shape pattern.
+func (m *MkdirSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		m.Path = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("mkdir: expected string path or mapping, got %s", nodeKind(node.Kind))
+	}
+	type alias MkdirSpec
+	var a alias
+	if err := node.Decode(&a); err != nil {
+		return err
+	}
+	*m = MkdirSpec(a)
+	return nil
+}
+
+// SymlinkSpec manages a symbolic link. No shorthand — two required fields.
+// `force: true` (default) replaces an existing symlink whose target differs
+// AND replaces an existing regular file at dst (the typical `ln -sfn` use
+// case). `force: false` is conservative: keeps an existing real file at dst,
+// reports an error to surface the conflict.
+//
+// Idempotency: when dst is already a symlink AND os.Readlink(dst) == src,
+// the task is skipped.
+type SymlinkSpec struct {
+	Src   string `yaml:"src"`             // target the link points TO
+	Dst   string `yaml:"dst"`             // the symlink path itself
+	Force *bool  `yaml:"force,omitempty"` // default true; set explicitly to false to refuse to overwrite a regular file at dst
+}
+
+// RemoveSpec deletes a path. Shorthand `remove: /path` is sugar for
+// `remove: { path: /path }`. `recursive: true` is required to remove a
+// non-empty directory (rm -rf semantics) — default false is safer and
+// matches `rmdir`/`unlink` behavior.
+//
+// Idempotency: absent → skipped. Always operates on the symlink itself,
+// never follows it.
+type RemoveSpec struct {
+	Path      string `yaml:"path"`
+	Recursive bool   `yaml:"recursive,omitempty"` // default false; true = rm -rf
+}
+
+func (r *RemoveSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		r.Path = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("remove: expected string path or mapping, got %s", nodeKind(node.Kind))
+	}
+	type alias RemoveSpec
+	var a alias
+	if err := node.Decode(&a); err != nil {
+		return err
+	}
+	*r = RemoveSpec(a)
+	return nil
 }
 
 type TemplateSpec struct {
@@ -307,6 +386,12 @@ func (t Task) Kind() string {
 		return "copy"
 	case t.Template != nil:
 		return "template"
+	case t.Mkdir != nil:
+		return "mkdir"
+	case t.Symlink != nil:
+		return "symlink"
+	case t.Remove != nil:
+		return "remove"
 	case t.Apt != nil:
 		return "apt"
 	case t.Service != nil:

@@ -94,6 +94,42 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 			return err
 		}
 	}
+	if t.Mkdir != nil {
+		if s, err := renderString(t.Mkdir.Path, vars); err == nil {
+			t.Mkdir.Path = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Mkdir.Owner, vars); err == nil {
+			t.Mkdir.Owner = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Mkdir.Group, vars); err == nil {
+			t.Mkdir.Group = s
+		} else {
+			return err
+		}
+	}
+	if t.Symlink != nil {
+		if s, err := renderString(t.Symlink.Src, vars); err == nil {
+			t.Symlink.Src = s
+		} else {
+			return err
+		}
+		if s, err := renderString(t.Symlink.Dst, vars); err == nil {
+			t.Symlink.Dst = s
+		} else {
+			return err
+		}
+	}
+	if t.Remove != nil {
+		if s, err := renderString(t.Remove.Path, vars); err == nil {
+			t.Remove.Path = s
+		} else {
+			return err
+		}
+	}
 	if t.Apt != nil {
 		for i, n := range t.Apt.Name {
 			s, err := renderString(n, vars)

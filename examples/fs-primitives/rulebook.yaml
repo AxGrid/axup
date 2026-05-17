@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/AxGrid/axup/main/schemas/rulebook.schema.json
+name: fs-primitives-demo
+
+vars:
+  release: v1.2.3
+
+bootstrap:
+  # mkdir: shorthand form
+  - mkdir: /opt/fs-demo
+
+  # mkdir: full form with mode
+  - mkdir:
+      path: /opt/fs-demo/data
+      mode: "0750"
+
+  # mkdir: with templated path + owner (owner=root always exists on cert2)
+  - mkdir:
+      path: "/opt/fs-demo/releases/{{ .release }}"
+      mode: "0755"
+      owner: root
+      group: root
+
+  # symlink: blue-green pattern
+  - symlink:
+      src: "/opt/fs-demo/releases/{{ .release }}"
+      dst: /opt/fs-demo/current
+
+  # remove: shorthand
+  - remove: /opt/fs-demo/stale.flag
+
+  # remove: full form (recursive)
+  - remove:
+      path: /opt/fs-demo/old-releases
+      recursive: true

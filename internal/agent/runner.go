@@ -135,9 +135,16 @@ func Run(in io.Reader, out io.Writer) error {
 
 func executeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	// when_changed gates everything except file primitives (which already
-	// have their own sha diff). Skipping here keeps each task handler
-	// simpler — they assume the gate has already opened.
-	if len(t.WhenChanged) > 0 && t.Type != protocol.TaskCopy && t.Type != protocol.TaskTemplate {
+	// have their own sha/stat-based diff). Skipping here keeps each task
+	// handler simpler — they assume the gate has already opened. Parser
+	// already rejects when_changed on these types, but we re-check at
+	// runtime in case a forged plan slips through.
+	if len(t.WhenChanged) > 0 &&
+		t.Type != protocol.TaskCopy &&
+		t.Type != protocol.TaskTemplate &&
+		t.Type != protocol.TaskMkdir &&
+		t.Type != protocol.TaskSymlink &&
+		t.Type != protocol.TaskRemove {
 		any := false
 		for _, p := range t.WhenChanged {
 			if ctx.changed[p] {
@@ -158,6 +165,12 @@ func executeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return runCommandTask(ctx, t)
 	case protocol.TaskCopy, protocol.TaskTemplate:
 		return runFileTask(ctx, t)
+	case protocol.TaskMkdir:
+		return runMkdirTask(ctx, t)
+	case protocol.TaskSymlink:
+		return runSymlinkTask(ctx, t)
+	case protocol.TaskRemove:
+		return runRemoveTask(ctx, t)
 	case protocol.TaskApt:
 		return runAptTask(ctx, t)
 	case protocol.TaskService:

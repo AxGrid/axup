@@ -258,6 +258,9 @@ each below:
 | [`command`](#command) | remote | Shell command via `/bin/sh -c` | `command` |
 | [`copy`](#copy) | remote | Literal file from rulebook dir → remote path | `src`, `dst` |
 | [`template`](#template) | remote | Go template (+ sprig) → remote path | `src`, `dst` |
+| [`mkdir`](#mkdir) | remote | Create directory; reconcile mode/owner/group | `path` |
+| [`symlink`](#symlink) | remote | Create / update a symbolic link | `src`, `dst` |
+| [`remove`](#remove) | remote | Delete a path (file / dir / symlink), idempotent | `path` |
 | [`apt`](#apt) | remote | Install / remove Debian packages | `name` (or `update_cache: true`) |
 | [`service`](#service) | remote | Manage a systemd or supervisor unit | `name` |
 | [`docker_install`](#docker_install) | remote | Install Docker Engine via `get.docker.com` | — |
@@ -270,7 +273,7 @@ Common keys every task may carry:
 | Key | Type | Applies to | Effect |
 |---|---|---|---|
 | `name` | string | every type | Human-readable label shown in CLI output (`▶ <name> (id)`). Defaults to `task #N`. |
-| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template`** — those have their own sha-diff skip logic and the gate would be redundant. |
+| `when_changed` | list of remote paths | `command`, `apt`, `service`, `docker_compose`, `docker_install`, `docker_login` | Gate the task: it fires only if any of the listed paths were written by an earlier task this run. **Rejected on `copy` / `template` / `mkdir` / `symlink` / `remove`** — those each stat their own path and decide skip-vs-apply on their own. |
 | `use` | `<dep>/<module_path>` | (special) | Splice a module from a `deps:` entry at this position. Mutually exclusive with the primitives above. See [external-rulebooks.md](external-rulebooks.md). |
 
 Status semantics (what each task can return in events):
@@ -340,6 +343,101 @@ environment=ENV={{ env "DEPLOY_ENV" | default "prod" }}
 
 Status: same semantics as `copy`. The render happens on the CLI host using the
 host's vars; the agent writes the resulting bytes atomically.
+
+### `mkdir`
+
+Create a directory on the remote. Always behaves like `mkdir -p` — parent
+directories are created automatically. Mode, owner, and group are
+reconciled on every run (drift in any of them triggers chmod / chown).
+
+```yaml
+# Shorthand: just a path. Mode defaults to 0755, no chown.
+- mkdir: /opt/myapp
+
+# Full form
+- mkdir:
+    path: /var/log/myapp
+    mode: "0750"          # default 0755; must be a quoted octal string
+    owner: app            # optional; user must already exist on the remote
+    group: app            # optional; group must already exist
+```
+
+Idempotency:
+
+- **Absent** → `mkdir -p` + chmod + optional chown → `changed`.
+- **Present and is a directory, all attributes match** → `skipped`.
+- **Present and is a directory, mode/owner/group drift** → chmod / chown
+  to reconcile → `changed`.
+- **Present and is a regular file** → `error`. We never auto-`rm` to "fix"
+  the conflict — use a `remove:` task before the `mkdir:` if that's
+  intentional.
+
+`owner` / `group` are resolved on the remote via `/etc/passwd` and
+`/etc/group`. Failure to resolve a non-empty name returns a clear error
+("resolve owner \"app\": ... — run earlier task to useradd it, or drop the
+field") rather than silently chown'ing to uid `-1`.
+
+### `symlink`
+
+Create or reconcile a symbolic link. Typical use case is the blue-green
+deploy pattern: each release lives in `/opt/myapp-v1.2.3/`, and a
+`current` symlink points to the active one.
+
+```yaml
+- symlink:
+    src: "/opt/myapp-{{ .release }}"   # what the link points TO
+    dst: /opt/myapp/current             # the link itself
+    force: true                          # default true — see below
+```
+
+Idempotency:
+
+- **`dst` absent** → create symlink → `changed`.
+- **`dst` is a symlink with the right target** → `skipped`.
+- **`dst` is a symlink with a different target** → unlink + relink →
+  `changed`.
+- **`dst` is a regular file or directory** → `force: true` (default)
+  removes it and creates the symlink; `force: false` returns `error`
+  ("exists and is not a symlink").
+
+`force: true` matches `ln -sfn` semantics — the common case where you
+*want* to replace whatever's there. `force: false` is the safety belt
+for cases where overwriting a real file at `dst` should be loud.
+RemoveAll is used to clear `dst` under `force: true`, so a non-empty
+directory at `dst` will be removed — passing `force: true` is the
+explicit opt-in for that.
+
+Parent directory of `dst` is auto-created (`MkdirAll`) so a fresh
+`/opt/myapp/current` works without a prior `mkdir: /opt/myapp`.
+
+### `remove`
+
+Delete a path. Idempotent — absent paths report `skipped` instead of
+erroring.
+
+```yaml
+# Shorthand
+- remove: /opt/myapp/stale.flag
+
+# Full form
+- remove:
+    path: /opt/myapp/old-releases
+    recursive: true                     # default false; required for non-empty dirs
+```
+
+Idempotency:
+
+- **Absent** → `skipped`.
+- **Present (file or symlink)** → unlink → `changed`. Symlinks are
+  unlinked; the symlink's target is left alone.
+- **Present and is a directory, `recursive: false`** → `error` if
+  non-empty (the underlying `os.Remove` returns `ENOTEMPTY`). Empty dirs
+  remove cleanly.
+- **Present and is a directory, `recursive: true`** → `rm -rf` semantics
+  → `changed`.
+
+`recursive: false` is the default specifically to avoid surprising `rm
+-rf` accidents from a typo'd path — opt into it explicitly.
 
 ### `apt`
 
@@ -504,6 +602,9 @@ tasks:
 - `name:` is missing or fails the regex
 - `history:` is set outside 0..50
 - A task has zero operations or more than one operation
+- `mkdir:` is missing `path:`, or has a non-octal `mode:`
+- `symlink:` is missing `src:` or `dst:`
+- `remove:` is missing `path:`
 - `apt:` is missing `name:`, or has an invalid `state:`
 - `service:` is missing `name:`, or has an invalid `state:` / `provider:`,
   or sets `enabled:` with `provider: supervisor`

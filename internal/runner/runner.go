@@ -430,6 +430,41 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 				Sha256: sha256Hex(body), BodyB64: base64.StdEncoding.EncodeToString(body),
 			})
 
+		case "mkdir":
+			mode := t.Mkdir.Mode
+			if mode == "" {
+				mode = "0755"
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:       protocol.TaskMkdir,
+				MkdirPath:  t.Mkdir.Path,
+				Mode:       mode,
+				MkdirOwner: t.Mkdir.Owner,
+				MkdirGroup: t.Mkdir.Group,
+			})
+
+		case "symlink":
+			force := true
+			if t.Symlink.Force != nil {
+				force = *t.Symlink.Force
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:         protocol.TaskSymlink,
+				SymlinkSrc:   t.Symlink.Src,
+				SymlinkDst:   t.Symlink.Dst,
+				SymlinkForce: force,
+			})
+
+		case "remove":
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name,
+				Type:            protocol.TaskRemove,
+				RemovePath:      t.Remove.Path,
+				RemoveRecursive: t.Remove.Recursive,
+			})
+
 		case "apt":
 			state := t.Apt.State
 			if state == "" {

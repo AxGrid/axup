@@ -28,6 +28,9 @@ const (
 	TaskCommand       = "command"
 	TaskCopy          = "copy"
 	TaskTemplate      = "template"
+	TaskMkdir         = "mkdir"
+	TaskSymlink       = "symlink"
+	TaskRemove        = "remove"
 	TaskApt           = "apt"
 	TaskService       = "service"
 	TaskDockerCompose = "docker_compose"
@@ -77,6 +80,20 @@ type Task struct {
 	Mode    string `json:"mode,omitempty"`    // octal string, e.g. "0644"; empty = 0644
 	Sha256  string `json:"sha256,omitempty"`  // hex digest of decoded body
 	BodyB64 string `json:"body_b64,omitempty"`
+
+	// mkdir:
+	MkdirPath  string `json:"mkdir_path,omitempty"`
+	MkdirOwner string `json:"mkdir_owner,omitempty"` // username; empty = no chown
+	MkdirGroup string `json:"mkdir_group,omitempty"` // group name; empty = no chgrp
+
+	// symlink:
+	SymlinkSrc   string `json:"symlink_src,omitempty"`   // the path the link points TO
+	SymlinkDst   string `json:"symlink_dst,omitempty"`   // the symlink itself
+	SymlinkForce bool   `json:"symlink_force,omitempty"` // replace existing dst (even if it's a regular file)
+
+	// remove:
+	RemovePath      string `json:"remove_path,omitempty"`
+	RemoveRecursive bool   `json:"remove_recursive,omitempty"` // dirs require this; without it, rmdir-like (errors on non-empty dirs)
 
 	// apt:
 	AptPackages    []string `json:"apt_packages,omitempty"`

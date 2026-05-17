@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -227,6 +228,15 @@ func validateTasks(phase string, tasks []Task) error {
 		if t.Template != nil {
 			set++
 		}
+		if t.Mkdir != nil {
+			set++
+		}
+		if t.Symlink != nil {
+			set++
+		}
+		if t.Remove != nil {
+			set++
+		}
 		if t.Apt != nil {
 			set++
 		}
@@ -251,7 +261,7 @@ func validateTasks(phase string, tasks []Task) error {
 			return fmt.Errorf("%s[%d] (%q): use %q did not resolve — declare the dep in deps:[]", phase, i, t.Name, t.Use)
 		}
 		if set == 0 {
-			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
+			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
 		}
 		if set > 1 {
 			return fmt.Errorf("%s[%d] (%q): multiple operations set; choose exactly one", phase, i, t.Name)
@@ -261,6 +271,24 @@ func validateTasks(phase string, tasks []Task) error {
 		}
 		if t.Template != nil && (t.Template.Src == "" || t.Template.Dst == "") {
 			return fmt.Errorf("%s[%d] (%q): template requires both src and dst", phase, i, t.Name)
+		}
+		if t.Mkdir != nil {
+			if t.Mkdir.Path == "" {
+				return fmt.Errorf("%s[%d] (%q): mkdir requires path (use shorthand `mkdir: /path` or full `mkdir: { path: /path }`)", phase, i, t.Name)
+			}
+			if t.Mkdir.Mode != "" {
+				if _, err := strconv.ParseUint(t.Mkdir.Mode, 8, 32); err != nil {
+					return fmt.Errorf("%s[%d] (%q): mkdir mode %q is not a valid octal string (e.g. \"0755\")", phase, i, t.Name, t.Mkdir.Mode)
+				}
+			}
+		}
+		if t.Symlink != nil {
+			if t.Symlink.Src == "" || t.Symlink.Dst == "" {
+				return fmt.Errorf("%s[%d] (%q): symlink requires both src (target) and dst (link path)", phase, i, t.Name)
+			}
+		}
+		if t.Remove != nil && t.Remove.Path == "" {
+			return fmt.Errorf("%s[%d] (%q): remove requires path (use shorthand `remove: /path` or full `remove: { path: /path }`)", phase, i, t.Name)
 		}
 		if t.Apt != nil {
 			if len(t.Apt.Name) == 0 && !t.Apt.UpdateCache {
@@ -347,8 +375,8 @@ func validateTasks(phase string, tasks []Task) error {
 				return fmt.Errorf("%s[%d] (%q): docker_login location must be one of both/local/remote, got %q", phase, i, t.Name, t.DockerLogin.Location)
 			}
 		}
-		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil) {
-			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template (they have their own sha diff)", phase, i, t.Name)
+		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil || t.Mkdir != nil || t.Symlink != nil || t.Remove != nil) {
+			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template/mkdir/symlink/remove (each one stats its path and decides skip-vs-apply on its own)", phase, i, t.Name)
 		}
 	}
 	return nil
