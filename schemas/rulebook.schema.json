@@ -118,7 +118,13 @@
           "items": { "type": "string" },
           "description": "Run only if any of these remote paths changed earlier in this phase. Invalid on copy/template/mkdir/symlink/remove/chmod/chown/download (each one stats its path and decides skip-vs-apply on its own)."
         },
-        "command": { "type": "string", "description": "Shell command run via /bin/sh -c on the remote. Always reports status=changed unless when_changed gates it." },
+        "command": {
+          "description": "Shell command run via /bin/sh -c on the remote. Use the string shorthand for a one-liner or the object form to add when/unless predicates and ignore_errors.",
+          "oneOf": [
+            { "type": "string" },
+            { "$ref": "#/$defs/command" }
+          ]
+        },
         "copy": { "$ref": "#/$defs/copy" },
         "template": { "$ref": "#/$defs/template" },
         "mkdir": { "$ref": "#/$defs/mkdir" },
@@ -141,6 +147,17 @@
           "description": "Vars passed to the imported module (only valid with `use:`).",
           "additionalProperties": true
         }
+      },
+      "additionalProperties": false
+    },
+    "command": {
+      "type": "object",
+      "required": ["run"],
+      "properties": {
+        "run": { "type": "string", "description": "Shell command body (multi-line strings are passed to /bin/sh -c)." },
+        "when": { "type": "string", "description": "Run the body only when this shell predicate exits 0. Mutually exclusive with unless." },
+        "unless": { "type": "string", "description": "Run the body only when this shell predicate exits non-zero. Mutually exclusive with when." },
+        "ignore_errors": { "type": "boolean", "description": "Non-zero exit becomes status=changed with an 'ignored exit=N' message instead of error." }
       },
       "additionalProperties": false
     },

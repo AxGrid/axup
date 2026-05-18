@@ -1,0 +1,56 @@
+name: cond-cmd-demo
+
+# Exercises the conditional execution surface added to `command:`:
+#   - `unless:` predicate gating
+#   - `when:` predicate gating
+#   - `ignore_errors:` tolerance for "|| true" style steps
+# Plus a supervisor program that proves the agent auto-runs
+# `supervisorctl reread && supervisorctl update` when a brand-new
+# /etc/supervisor/conf.d/*.ini lands.
+
+bootstrap:
+  # The shorthand form still works — equivalent to { run: "..." }.
+  - name: create target dir
+    command: "mkdir -p /opt/cond-cmd"
+
+  - name: ensure marker file (unless already there)
+    command:
+      run: echo "hello $(date)" > /opt/cond-cmd/marker
+      unless: test -f /opt/cond-cmd/marker
+
+  - name: snapshot if data dir exists
+    command:
+      run: tar -czf /opt/cond-cmd/snapshot.tgz /opt/cond-cmd
+      when: test -d /opt/cond-cmd
+
+  - name: stop kiosk if it's running (tolerate absence)
+    command:
+      run: supervisorctl stop cond-cmd-demo
+      ignore_errors: true
+
+  - name: install supervisor
+    apt:
+      name: supervisor
+      state: present
+      update_cache: false
+
+  - name: ensure supervisor running
+    service:
+      name: supervisor
+      state: started
+      enabled: true
+
+  - name: drop supervisor program
+    template:
+      src: templates/cond-cmd-demo.ini.tmpl
+      dst: /etc/supervisor/conf.d/cond-cmd-demo.ini
+      mode: "0644"
+
+  # No explicit `state: reloaded` — the agent autodetects "program not yet
+  # declared", runs `supervisorctl reread && supervisorctl update`, then
+  # starts the program.
+  - name: start the demo program
+    service:
+      name: cond-cmd-demo
+      state: started
+      provider: supervisor

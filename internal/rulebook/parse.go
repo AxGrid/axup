@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -233,8 +234,14 @@ func resolveDepsForLoad(rb *Rulebook) (map[string]string, error) {
 func validateTasks(phase string, tasks []Task) error {
 	for i, t := range tasks {
 		set := 0
-		if t.Command != "" {
+		if t.Command != nil {
 			set++
+			if strings.TrimSpace(t.Command.Run) == "" {
+				return fmt.Errorf("%s[%d] (%q): command.run is required", phase, i, t.Name)
+			}
+			if t.Command.When != "" && t.Command.Unless != "" {
+				return fmt.Errorf("%s[%d] (%q): command.when and command.unless are mutually exclusive", phase, i, t.Name)
+			}
 		}
 		if t.Copy != nil {
 			set++

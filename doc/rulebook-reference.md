@@ -307,6 +307,43 @@ Run a shell command on the remote via `/bin/sh -c`.
 Status: `changed` on exit code 0, `error` otherwise. Without `when_changed`
 the command runs on every invocation.
 
+#### Conditional execution + ignored errors
+
+The full form gates the command on a shell predicate and lets you ignore
+non-zero exits, in the spirit of Ansible's `creates:` / `removes:` and
+`failed_when:`:
+
+```yaml
+- name: ensure swap
+  command:
+    run: |
+      fallocate -l 4G /swapfile && chmod 600 /swapfile
+      mkswap /swapfile && swapon /swapfile
+      echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    unless: swapon --show | grep -q .   # skip if swap already exists
+
+- name: snapshot before deploy
+  command:
+    run: tar -czf /var/backups/data-{{ .git_short_sha }}.tar.gz /opt/myapp/data
+    when: test -d /opt/myapp/data       # only when there's data to snapshot
+
+- name: stop kiosk if it's running
+  command:
+    run: supervisorctl stop kiosk
+    ignore_errors: true                 # "|| true" — don't fail if absent
+```
+
+| Field | Meaning |
+|---|---|
+| `run` | The shell command body. Multi-line strings are fine (pass to `/bin/sh -c`). |
+| `when` | Run the body only if this shell predicate exits 0. Reports `skipped` otherwise. |
+| `unless` | Inverse of `when`: run only if the predicate exits non-zero. Reports `skipped` otherwise. |
+| `ignore_errors` | Non-zero exit becomes `changed` with an "ignored exit=N" message instead of `error`. |
+
+`when` and `unless` are mutually exclusive. Predicates run on the remote via
+`/bin/sh -c` and should be cheap, read-only sniffs (`test -f …`, `swapon --show
+| grep -q .`, `systemctl is-active nginx`).
+
 ### `copy`
 
 Send a literal file from the rulebook's directory to a remote path. Idempotent
@@ -683,6 +720,15 @@ Manage a unit on either systemd (default) or supervisor. Idempotent via
   when_changed:
     - /etc/supervisor/conf.d/my-worker.conf
 ```
+
+**Supervisor auto-reload.** When `provider: supervisor` and the named program
+is not present in `supervisorctl status` (typical right after a `template:` /
+`copy:` drops a new `*.ini` into `/etc/supervisor/conf.d/`), the agent
+automatically runs `supervisorctl reread && supervisorctl update` before
+issuing `start` / `restart`, then re-checks status. You don't need a separate
+`state: reloaded` task in front of every new program — declare the desired
+state and the reload is implicit. For `state: stopped`, a not-yet-declared
+program reports `skipped` ("nothing to stop") instead of erroring.
 
 ### `docker_install`
 

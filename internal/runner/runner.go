@@ -399,7 +399,11 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 		case "command":
 			remoteTasks = append(remoteTasks, protocol.Task{
 				ID: baseID, Name: name, WhenChanged: whenChanged,
-				Type: protocol.TaskCommand, Command: t.Command,
+				Type:             protocol.TaskCommand,
+				Command:          t.Command.Run,
+				CommandWhen:      t.Command.When,
+				CommandUnless:    t.Command.Unless,
+				CommandIgnoreErr: t.Command.IgnoreErrors,
 			})
 
 		case "copy":

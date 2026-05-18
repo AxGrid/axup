@@ -183,7 +183,7 @@ type DepSpec struct {
 // time and disappears from the final task list.
 type Task struct {
 	Name          string             `yaml:"name,omitempty"`
-	Command       string             `yaml:"command,omitempty"`
+	Command       *CommandSpec       `yaml:"command,omitempty"`
 	Copy          *CopySpec          `yaml:"copy,omitempty"`
 	Template      *TemplateSpec      `yaml:"template,omitempty"`
 	Mkdir         *MkdirSpec         `yaml:"mkdir,omitempty"`
@@ -215,6 +215,48 @@ type CopySpec struct {
 	Src  string `yaml:"src"`
 	Dst  string `yaml:"dst"`
 	Mode string `yaml:"mode,omitempty"`
+}
+
+// CommandSpec describes a shell command to run on the remote, with optional
+// gating predicates and an ignore_errors escape hatch. Accepts two YAML
+// surfaces:
+//
+//	command: echo hi                       # shorthand: just the command string
+//	command:                               # full form: gate + ignore_errors
+//	  run: swapon --add /swapfile
+//	  unless: swapon --show | grep -q .
+//	  ignore_errors: true
+//
+// `when:` runs the body only when the predicate exits 0; `unless:` is the
+// inverse (run only when the predicate exits non-0). They are mutually
+// exclusive. `ignore_errors:` flips a non-zero exit from `error` to `changed`
+// so the rest of the phase keeps going — handy for "stop kiosk || true"
+// patterns.
+type CommandSpec struct {
+	Run          string `yaml:"run"`
+	When         string `yaml:"when,omitempty"`
+	Unless       string `yaml:"unless,omitempty"`
+	IgnoreErrors bool   `yaml:"ignore_errors,omitempty"`
+}
+
+// UnmarshalYAML accepts either a bare command string ("command: echo hi") or
+// the full CommandSpec object form.
+func (c *CommandSpec) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		c.Run = node.Value
+		return nil
+	case yaml.MappingNode:
+		type raw CommandSpec
+		var r raw
+		if err := node.Decode(&r); err != nil {
+			return err
+		}
+		*c = CommandSpec(r)
+		return nil
+	default:
+		return fmt.Errorf("command: expected string or mapping at line %d", node.Line)
+	}
 }
 
 // MkdirSpec creates a directory on the remote with mode/owner/group. Shorthand
@@ -492,7 +534,7 @@ func (s *StringOrList) UnmarshalYAML(node *yaml.Node) error {
 // Kind returns the discriminator for this task.
 func (t Task) Kind() string {
 	switch {
-	case t.Command != "":
+	case t.Command != nil:
 		return "command"
 	case t.Copy != nil:
 		return "copy"

@@ -1,0 +1,6 @@
+[program:cond-cmd-demo]
+command=/bin/sh -c 'while true; do echo "alive $(date)"; sleep 30; done'
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/cond-cmd-demo.err.log
+stdout_logfile=/var/log/cond-cmd-demo.out.log

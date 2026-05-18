@@ -61,12 +61,26 @@ func (rb *Rulebook) expandStringFields() error {
 }
 
 func expandTaskStrings(t *Task, vars map[string]any) error {
-	if t.Command != "" {
-		s, err := renderString(t.Command, vars)
-		if err != nil {
+	if t.Command != nil {
+		if s, err := renderString(t.Command.Run, vars); err != nil {
 			return err
+		} else {
+			t.Command.Run = s
 		}
-		t.Command = s
+		if t.Command.When != "" {
+			if s, err := renderString(t.Command.When, vars); err != nil {
+				return err
+			} else {
+				t.Command.When = s
+			}
+		}
+		if t.Command.Unless != "" {
+			if s, err := renderString(t.Command.Unless, vars); err != nil {
+				return err
+			} else {
+				t.Command.Unless = s
+			}
+		}
 	}
 	if t.Copy != nil {
 		// Render both src and dst so a host can choose its own input file via

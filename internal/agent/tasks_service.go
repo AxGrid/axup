@@ -132,19 +132,52 @@ func systemctlIs(verb, name string) (string, error) {
 }
 
 func runSupervisorService(ctx *runCtx, name, state string) protocol.Event {
+	declared, curState, _ := supervisorProgramStatus(name)
+
+	// Auto-reload supervisord when the program isn't yet declared — typical
+	// flow is that `copy:` or `template:` just dropped a new
+	// /etc/supervisor/conf.d/<name>.ini and the operator now wants it
+	// running. Skip the reload when the goal is "stopped" (nothing to stop)
+	// and when we only need `update` itself.
+	var preMsg string
+	if !declared && state != "stopped" && state != "reloaded" {
+		if ctx.dryRun {
+			return protocol.Event{
+				Status:  protocol.StatusWouldChange,
+				Message: name + ": would supervisorctl reread+update (program not yet declared)",
+			}
+		}
+		if err := supervisorReload(); err != nil {
+			return protocol.Event{Status: protocol.StatusError, Message: "supervisorctl reread/update for " + name + ": " + err.Error()}
+		}
+		declared, curState, _ = supervisorProgramStatus(name)
+		if !declared {
+			return protocol.Event{
+				Status:  protocol.StatusError,
+				Message: name + ": still not declared after supervisorctl update (check /etc/supervisor/conf.d/)",
+			}
+		}
+		preMsg = "reread+update; "
+	}
+
 	// Decide
 	var verb string
 	switch state {
 	case "started":
-		st, _ := supervisorState(name)
-		if st == "RUNNING" {
-			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": already RUNNING"}
+		if curState == "RUNNING" {
+			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": " + preMsg + "already RUNNING"}
 		}
+		// reread+update auto-starts new programs with autostart=true. If we
+		// already see RUNNING after the reload, no extra start is needed —
+		// otherwise fall through to an explicit start so manual entries also
+		// come up.
 		verb = "start"
 	case "stopped":
-		st, _ := supervisorState(name)
-		if st == "STOPPED" || st == "EXITED" || st == "FATAL" {
-			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": already " + st}
+		if !declared {
+			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": not declared (nothing to stop)"}
+		}
+		if curState == "STOPPED" || curState == "EXITED" || curState == "FATAL" {
+			return protocol.Event{Status: protocol.StatusSkipped, Message: name + ": already " + curState}
 		}
 		verb = "stop"
 	case "restarted":
@@ -171,26 +204,49 @@ func runSupervisorService(ctx *runCtx, name, state string) protocol.Event {
 	if err := runCapture("supervisorctl", args, &stdout, &stderr); err != nil {
 		return protocol.Event{Status: protocol.StatusError, Stdout: stdout.String(), Stderr: stderr.String(), Message: "supervisorctl " + verb + ": " + err.Error()}
 	}
-	msg := name + ": " + verb
+	msg := name + ": " + preMsg + verb
 	if verb == "update" {
-		msg = "supervisorctl update"
+		msg = preMsg + "supervisorctl update"
 	}
 	return protocol.Event{Status: protocol.StatusChanged, Stdout: stdout.String(), Stderr: stderr.String(), Message: msg}
 }
 
-// supervisorState parses `supervisorctl status <name>` output. Returns the
-// state word (RUNNING, STOPPED, …) or empty if the program is not declared.
-func supervisorState(name string) (string, error) {
+// supervisorProgramStatus runs `supervisorctl status <name>` and reports
+// whether supervisord knows about the program plus its state word. Detection
+// relies on the "no such process" / "no such service" marker supervisord
+// prints for unknown names — matched case-insensitively in stdout+stderr.
+func supervisorProgramStatus(name string) (declared bool, state string, err error) {
 	cmd := exec.Command("supervisorctl", "status", name)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errBuf
 	_ = cmd.Run()
+	body := strings.ToLower(out.String() + " " + errBuf.String())
+	if strings.Contains(body, "no such process") || strings.Contains(body, "no such service") {
+		return false, "", nil
+	}
 	fields := strings.Fields(out.String())
 	if len(fields) < 2 {
-		return "", fmt.Errorf("unexpected supervisorctl status output: %q", out.String())
+		return false, "", fmt.Errorf("unexpected supervisorctl status output: %q", out.String())
 	}
-	return fields[1], nil
+	return true, fields[1], nil
+}
+
+// supervisorReload runs `supervisorctl reread && supervisorctl update`. Each
+// call is invoked separately so we can surface which step failed. `reread`
+// loads the config files; `update` applies any add/remove/change deltas
+// (which includes auto-starting new entries marked autostart=true).
+func supervisorReload() error {
+	var so, se bytes.Buffer
+	if err := runCapture("supervisorctl", []string{"reread"}, &so, &se); err != nil {
+		return fmt.Errorf("reread: %v (stderr: %s)", err, strings.TrimSpace(se.String()))
+	}
+	so.Reset()
+	se.Reset()
+	if err := runCapture("supervisorctl", []string{"update"}, &so, &se); err != nil {
+		return fmt.Errorf("update: %v (stderr: %s)", err, strings.TrimSpace(se.String()))
+	}
+	return nil
 }
 
 func runCapture(name string, args []string, stdout, stderr *bytes.Buffer) error {

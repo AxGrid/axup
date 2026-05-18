@@ -78,7 +78,10 @@ type Task struct {
 	Type string `json:"type"`
 
 	// command:
-	Command string `json:"command,omitempty"`
+	Command         string `json:"command,omitempty"`
+	CommandWhen     string `json:"command_when,omitempty"`     // gate: run only if this shell predicate exits 0
+	CommandUnless   string `json:"command_unless,omitempty"`   // gate: run only if this shell predicate exits non-0
+	CommandIgnoreErr bool  `json:"command_ignore_err,omitempty"` // non-zero exit becomes changed instead of error
 
 	// copy / template / download (shared file-target fields):
 	DstPath string `json:"dst_path,omitempty"`

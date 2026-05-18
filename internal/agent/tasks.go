@@ -42,6 +42,35 @@ func newRunCtx(s *State, dryRun, diff bool, keepHistory int, phase string) *runC
 }
 
 func runCommandTask(ctx *runCtx, t protocol.Task) protocol.Event {
+	// Predicate gating: when:/unless: are evaluated BEFORE the dry-run check
+	// so the gate decision is visible in --check output too. The predicate
+	// itself runs on the host either way — it must be a read-only sniff
+	// (e.g. `test -f /foo`, `swapon --show | grep -q .`).
+	if t.CommandWhen != "" {
+		ok, ev := evalPredicate(t.CommandWhen)
+		if ev != nil {
+			return *ev
+		}
+		if !ok {
+			return protocol.Event{
+				Status:  protocol.StatusSkipped,
+				Message: "when predicate exited non-zero: " + truncate(t.CommandWhen, 60),
+			}
+		}
+	}
+	if t.CommandUnless != "" {
+		ok, ev := evalPredicate(t.CommandUnless)
+		if ev != nil {
+			return *ev
+		}
+		if ok {
+			return protocol.Event{
+				Status:  protocol.StatusSkipped,
+				Message: "unless predicate already satisfied: " + truncate(t.CommandUnless, 60),
+			}
+		}
+	}
+
 	if ctx.dryRun {
 		return protocol.Event{
 			Status:  protocol.StatusWouldChange,
@@ -57,12 +86,18 @@ func runCommandTask(ctx *runCtx, t protocol.Task) protocol.Event {
 	status := protocol.StatusChanged
 	var msg string
 	if err != nil {
-		status = protocol.StatusError
 		if ee, ok := err.(*exec.ExitError); ok {
 			exit = ee.ExitCode()
 		} else {
 			exit = -1
 			msg = err.Error()
+		}
+		if t.CommandIgnoreErr {
+			// Surface what happened in the message so the operator can still
+			// see the failure even though we're not stopping the phase.
+			msg = fmt.Sprintf("ignored exit=%d: %s", exit, strings.TrimSpace(stderr.String()))
+		} else {
+			status = protocol.StatusError
 		}
 	}
 	return protocol.Event{
@@ -72,6 +107,34 @@ func runCommandTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		ExitCode: exit,
 		Message:  msg,
 	}
+}
+
+// evalPredicate runs a shell expression and returns whether it succeeded
+// (exit 0). A non-ExitError (e.g. /bin/sh missing, signal kill) bubbles
+// up as a synthetic error Event so the task fails loudly rather than
+// silently treating the predicate as false.
+func evalPredicate(expr string) (bool, *protocol.Event) {
+	cmd := exec.Command("/bin/sh", "-c", expr)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		return false, nil
+	}
+	return false, &protocol.Event{
+		Status:  protocol.StatusError,
+		Message: "predicate failed to run: " + err.Error(),
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
 
 // runFileTask handles copy and template tasks identically — both deliver an
