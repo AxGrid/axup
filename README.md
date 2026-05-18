@@ -131,7 +131,27 @@ axup v0.0.3 commit=ab12cde built=2026-05-16T20:17:40Z darwin/arm64
 
 The tag is taken from `git describe --tags --always --dirty` at build time. A clean release looks like `v0.0.3`; a build on top of `v0.0.3` with local changes shows `v0.0.3-2-gab12cde-dirty`.
 
-There is **no `axup update` / `self-update` command** — updating is a `git pull && make install`:
+### One-line install
+
+For macOS and Linux (amd64 + arm64) — drops `axup` into `~/.local/bin`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AxGrid/axup/master/install.sh | sh
+```
+
+The script pulls the matching prebuilt binary from the latest GitHub Release (`axup-darwin-arm64`, `axup-linux-amd64`, …); if no release is available it falls back to `go install github.com/axgrid/axup/cmd/axup@<version>` when Go is on PATH. Pin a specific tag with `AXUP_VERSION=v0.0.4 curl ... | sh`; install elsewhere with `AXUP_BIN_DIR=/usr/local/bin curl ... | sh` (sudo applied automatically if the target needs it).
+
+With Go already installed and no curl needed:
+
+```sh
+make install-latest                   # `go install ...@master` → /usr/local/bin/axup
+# or pure go install — same binary, you pick the BINDIR:
+go install github.com/axgrid/axup/cmd/axup@master
+```
+
+`go install`-built binaries self-report a useful `axup version` via `runtime/debug.BuildInfo` (module pseudo-version + VCS commit + commit time) — no Makefile / ldflags required.
+
+### From source
 
 ```sh
 cd /path/to/axup
@@ -143,6 +163,10 @@ axup version                          # confirm new build
 ```
 
 `make install` always rebuilds, embeds a fresh agent for `linux/{amd64,arm64}`, and overwrites the binary at `$(PREFIX)/bin/axup`. To downgrade, `git checkout v0.0.2 && make install`.
+
+### Release artifacts
+
+`make release` cross-compiles `axup` for `darwin-{amd64,arm64}` + `linux-{amd64,arm64}` into `./dist/`. `make release-archives` additionally wraps each binary in a `.tar.gz` and writes a `SHA256SUMS`. The `.github/workflows/release.yml` workflow runs this on every `v*` tag push and uploads the artifacts to the matching GitHub Release.
 
 ## Documentation
 
