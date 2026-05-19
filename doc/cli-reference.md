@@ -22,10 +22,12 @@ Top-level commands:
 | `axup init` | Scaffold a stub `rulebook.yaml` in the current directory |
 | `axup deps tidy` | Resolve `deps:` to fresh SHAs and rewrite `axup.lock` |
 | `axup deps verify` | Check that `axup.lock` matches the declared deps |
-| `axup secrets encrypt` | Age-encrypt a file (or every declared file) |
+| `axup secrets encrypt` | Age / sops-encrypt a file (or every declared file) |
 | `axup secrets decrypt` | Print a decrypted file to stdout |
 | `axup secrets edit` | Decrypt → `$EDITOR` → encrypt cycle |
 | `axup secrets status` | Report encrypted / plaintext / missing state of declared secret files |
+| `axup secrets seal` | Pair-mode: encrypt every plaintext `decrypted_to:` → its `path:` |
+| `axup secrets unseal` | Pair-mode: decrypt every `path:` → its `decrypted_to:` working file |
 | `axup version` | Print the binary version |
 | `axup help [command]` | Help for a specific command |
 
@@ -46,7 +48,9 @@ These work on every subcommand:
 | `--diff` | In dry-run mode, attach a unified diff to every `copy:`/`template:` task that would overwrite a file. Implies `--check`. New files show as all-`+` lines; binary files fall back to a one-line "binary, sha changed" note; mode-only changes get a single-line note. Requires `/usr/bin/diff` on the remote (in every supported distro by default). |
 | `--no-color` | Disable ANSI colors. Auto-disabled when stdout is not a TTY. |
 | `--age-key PATH` | Path to age identity file. **Repeatable** for multiple keys. Overrides auto-discovery. |
+| `--accept-new-hostkey` | Auto-accept and record unknown SSH host keys (`StrictHostKeyChecking=accept-new`); otherwise the user is prompted on a TTY. |
 | `-h, --help` | Help for the command. |
+| `-v, --version` | Print version and exit (alias for `axup version`). |
 
 ### Auth flags
 
@@ -141,7 +145,7 @@ migrate:      [...]
 ```sh
 axup run deploy_crash --group stage         # only push the game modules
 axup run migrate --host prod-1              # run migrations on one host
-axup run axup --check --group prod        # equivalent to `axup deploy --check`
+axup run deploy --check --group prod        # equivalent to `axup deploy --check`
 ```
 
 Phase names must match `^[a-z][a-z0-9_-]*$` and cannot be `status` /
@@ -354,15 +358,19 @@ axup secrets encrypt [FILE] [--rulebook PATH]
 axup secrets decrypt FILE   [--rulebook PATH]
 axup secrets edit    FILE   [--rulebook PATH]
 axup secrets status         [--rulebook PATH]
+axup secrets seal           [--rulebook PATH]
+axup secrets unseal         [--rulebook PATH]
 ```
 
 | Subcommand | Behavior |
 |---|---|
-| `encrypt FILE` | Encrypt that single file in place against `recipients.txt`. |
-| `encrypt` (no arg) | Encrypt every file in `rulebook.yaml`'s `secrets.files`. Skips already-encrypted files. Exits non-zero if a declared file is missing. |
+| `encrypt FILE` | Encrypt that single file in place against `recipients.txt`. Backend chosen by extension: sops (structural) for yaml/yml/json/ini/env/toml; whole-file age otherwise. |
+| `encrypt` (no arg) | Encrypt every file in `rulebook.yaml`'s `secrets.files`. Skips already-encrypted entries and pair entries (use `seal` for those). Exits non-zero if a declared file is missing. |
 | `decrypt FILE` | Print plaintext to stdout. |
 | `edit FILE` | Decrypt → `$EDITOR` → encrypt back in place. Works on a non-existent file too. |
 | `status` | Report each `secrets.files` entry as `encrypted` / `PLAINTEXT` / `MISSING`. Exit non-zero if anything's not encrypted. |
+| `seal` | Encrypt every **pair entry**'s plaintext working copy (`decrypted_to`) into its committed-ciphertext path (`path`). Skips non-pair entries with a hint. |
+| `unseal` | Inverse of `seal`: decrypt every pair entry's `path` into its working `decrypted_to`. Auto-adds `decrypted_to` to the nearest `.gitignore`. |
 
 `--rulebook` locates `recipients.txt` and reads the `secrets:` block.
 
@@ -383,7 +391,7 @@ as `axup bootstrap` — see the `--age-key` row above and
 
 | Path | When |
 |---|---|
-| `~/.ssh/known_hosts` | Host key verification; auto-falls back to insecure-ignore if missing |
+| `~/.ssh/known_hosts` | Host key verification. Unknown hosts trigger an OpenSSH-style yes/no/[fingerprint] prompt on a TTY (or are auto-accepted under `--accept-new-hostkey`) — in either case the key is appended to `known_hosts` for next time. Mismatched keys hard-fail (no auto-overwrite). |
 | `~/.ssh/id_ed25519`, `id_rsa`, `id_ecdsa` | SSH auth fallback when ssh-agent / `--key` are absent |
 | `~/.config/age/keys.txt` | Age identity fallback when `--age-key` / `$AXUP_AGE_KEY` are absent |
 

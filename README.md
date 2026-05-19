@@ -15,7 +15,7 @@
 
 `axup` reads a YAML rulebook, opens an SSH connection to your server(s), uploads a small embedded agent into `/tmp`, and streams a plan of tasks to it: install packages, render templates, write configs, manage services, bring up Docker Compose stacks, build and push images, and so on. State (sha256 hashes of every managed file) lives on the remote, so re-runs only touch what actually changed.
 
-Compared to Ansible: no Python on either side, no roles/handlers ceremony, two built-in verbs (`bootstrap` and `deploy`) plus `run <phase>` for any custom phase you declare, and everything that isn't a task is just one of seventeen well-defined task types.
+Compared to Ansible: no Python on either side, no roles/handlers ceremony, two built-in verbs (`bootstrap` and `deploy`) plus `run <phase>` for any custom phase you declare, and everything that isn't a task is just one of nineteen well-defined task types.
 
 ## Quick start
 
@@ -36,7 +36,7 @@ A 5-minute end-to-end walkthrough lives in [doc/getting-started.md](doc/getting-
 
 ## Highlights
 
-- **Seventeen task primitives**: `command`, `copy`, `template`, `mkdir`, `symlink`, `remove`, `user`, `group`, `chmod`, `chown`, `download`, `apt`, `service` (systemd + supervisor), `docker_install`, `docker_build`, `docker_compose` (with `wait: true` for healthcheck-gated readiness), `docker_login`
+- **Nineteen task primitives**: `command` (with `when` / `unless` / `ignore_errors`), `copy`, `template`, `mkdir`, `symlink`, `remove`, `user`, `group`, `chmod`, `chown`, `download`, `apt`, `service` (systemd + supervisor, with auto `reread+update` on first sight of a new program), `docker_install`, `docker_build`, `docker_compose` (with `wait: true` for healthcheck-gated readiness), `docker_login`, `mysql_database`, `pg_database` (CREATE-if-missing via `mysql` / `psql` on the remote, + optional user/grant)
 - **Arbitrary phases**: any top-level key in the rulebook besides the reserved ones becomes a phase — run `bootstrap:` / `deploy:` / `deploy_crash:` / `migrate:` / … via `axup run <phase>`
 - **`axup logs <svc>...`**: tail per-service logs over SSH with `[host]` prefix, parallel across `--group`. Catalogs live under a `services:` block in the rulebook.
 - **External vars file**: `--vars file.yaml` merges a per-env dict into rulebook vars (precedence: inventory > --vars > git auto > rulebook defaults).
@@ -182,7 +182,7 @@ axup version                          # confirm new build
 
 ## Example projects
 
-The repository ships five end-to-end examples, each runnable against a real Linux box you have SSH access to:
+The repository ships several end-to-end examples, each runnable against a real Linux box you have SSH access to:
 
 | Example | Demonstrates |
 |---|---|
@@ -191,6 +191,8 @@ The repository ships five end-to-end examples, each runnable against a real Linu
 | [examples/build](examples/build) | Local `docker_build --push` + remote `docker_compose pull` with encrypted registry creds |
 | [examples/use](examples/use) | External rulebook module loaded via `deps:` + `use: common/echo` |
 | [examples/multihost](examples/multihost) | `inventory.yaml`, two logical hosts, parallel `--group all` |
+| [examples/cond-cmd](examples/cond-cmd) | `command:` long form (`when` / `unless` / `ignore_errors`) + supervisor auto-reload on a brand-new program |
+| [examples/db-create](examples/db-create) | `mysql_database:` + `pg_database:` — CREATE-if-missing with optional user/grant |
 
 ## Architecture in one paragraph
 
