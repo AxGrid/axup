@@ -1,0 +1,51 @@
+name: db-create-demo
+
+# Demonstrates mysql_database + pg_database. Both are pure
+# CREATE-if-missing — re-running the rulebook on a converged
+# database reports `skipped`. Credentials in this example are
+# inline so the example stays runnable; production rulebooks
+# should load them from age-encrypted vars:
+#
+#   admin_password: "{{ .mysql_root_pw }}"
+#   password: "{{ .myapp_db_pw }}"
+#
+# and pass the values via `--vars secrets.yaml` (where
+# secrets.yaml is decrypted at runtime).
+
+vars:
+  mysql_admin_pw: please-change-me
+  pg_admin_pw:    please-change-me
+  app_db_pw:      app-pw-please-change-me
+
+bootstrap:
+  # Both primitives shell out to the client CLI on the remote;
+  # they don't bundle a Go driver. Install the clients first.
+  - name: install db clients
+    apt:
+      name:
+        - mysql-client
+        - postgresql-client
+      update_cache: true
+
+  - name: mysql app db + user
+    mysql_database:
+      name: myapp
+      host: 127.0.0.1
+      admin_user: root
+      admin_password: "{{ .mysql_admin_pw }}"
+      user: myapp
+      password: "{{ .app_db_pw }}"
+      # user_host: 'localhost'      # lock the grant to loopback
+      # charset: utf8mb4
+      # collation: utf8mb4_0900_ai_ci
+
+  - name: postgres app db + role
+    pg_database:
+      name: myapp
+      host: 127.0.0.1
+      admin_user: postgres
+      admin_password: "{{ .pg_admin_pw }}"
+      user: myapp
+      password: "{{ .app_db_pw }}"
+      # encoding: UTF8
+      # owner: myapp                # defaults to user when set

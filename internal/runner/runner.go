@@ -601,6 +601,45 @@ func buildPlans(rb *rulebook.Rulebook, phase string, tasks []rulebook.Task) (loc
 				BuildArgs:       t.DockerBuild.BuildArgs,
 			})
 
+		case "mysql_database":
+			port := t.MysqlDatabase.Port
+			if port == 0 {
+				port = 3306
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name, WhenChanged: whenChanged,
+				Type:            protocol.TaskMysqlDatabase,
+				DbName:          t.MysqlDatabase.Name,
+				DbHost:          t.MysqlDatabase.Host,
+				DbPort:          port,
+				DbAdminUser:     t.MysqlDatabase.AdminUser,
+				DbAdminPassword: t.MysqlDatabase.AdminPassword,
+				DbCharset:       t.MysqlDatabase.Charset,
+				DbCollation:     t.MysqlDatabase.Collation,
+				DbUser:          t.MysqlDatabase.User,
+				DbPassword:      t.MysqlDatabase.Password,
+				DbUserHost:      t.MysqlDatabase.UserHost,
+			})
+
+		case "pg_database":
+			port := t.PgDatabase.Port
+			if port == 0 {
+				port = 5432
+			}
+			remoteTasks = append(remoteTasks, protocol.Task{
+				ID: baseID, Name: name, WhenChanged: whenChanged,
+				Type:            protocol.TaskPgDatabase,
+				DbName:          t.PgDatabase.Name,
+				DbHost:          t.PgDatabase.Host,
+				DbPort:          port,
+				DbAdminUser:     t.PgDatabase.AdminUser,
+				DbAdminPassword: t.PgDatabase.AdminPassword,
+				DbEncoding:      t.PgDatabase.Encoding,
+				DbOwner:         t.PgDatabase.Owner,
+				DbUser:          t.PgDatabase.User,
+				DbPassword:      t.PgDatabase.Password,
+			})
+
 		case "docker_login":
 			user, password, err := rb.LoadDockerCreds(t.DockerLogin)
 			if err != nil {

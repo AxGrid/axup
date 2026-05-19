@@ -42,6 +42,8 @@ const (
 	TaskDockerInstall = "docker_install"
 	TaskDockerBuild   = "docker_build" // executed locally by the CLI, never sent to the agent
 	TaskDockerLogin   = "docker_login" // executed both locally and on the agent depending on Location
+	TaskMysqlDatabase = "mysql_database"
+	TaskPgDatabase    = "pg_database"
 )
 
 type Plan struct {
@@ -153,6 +155,22 @@ type Task struct {
 	LoginRegistry string `json:"login_registry,omitempty"`
 	LoginUsername string `json:"login_username,omitempty"`
 	LoginPassword string `json:"login_password,omitempty"`
+
+	// mysql_database / pg_database (shared shape; engine = Task.Type).
+	// Agent shells out to mysql/psql; passwords go through MYSQL_PWD/PGPASSWORD
+	// env vars, not argv, so they don't appear in ps output.
+	DbName          string `json:"db_name,omitempty"`
+	DbHost          string `json:"db_host,omitempty"`
+	DbPort          int    `json:"db_port,omitempty"`
+	DbAdminUser     string `json:"db_admin_user,omitempty"`
+	DbAdminPassword string `json:"db_admin_password,omitempty"`
+	DbUser          string `json:"db_user,omitempty"`        // optional app user; when set, agent ensures CREATE USER + GRANT
+	DbPassword      string `json:"db_password,omitempty"`    // required when DbUser is set
+	DbCharset       string `json:"db_charset,omitempty"`     // mysql only; default utf8mb4
+	DbCollation     string `json:"db_collation,omitempty"`   // mysql only; default utf8mb4_0900_ai_ci
+	DbUserHost      string `json:"db_user_host,omitempty"`   // mysql only; default '%'
+	DbEncoding      string `json:"db_encoding,omitempty"`    // pg only; default UTF8
+	DbOwner         string `json:"db_owner,omitempty"`       // pg only; defaults to DbUser when set, else DbAdminUser
 
 	// Gate the task on whether any of these remote paths were changed this run.
 	// Applies to command/service/docker_compose/apt; redundant on copy/template.

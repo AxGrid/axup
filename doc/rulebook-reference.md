@@ -272,6 +272,8 @@ each below:
 | [`docker_compose`](#docker_compose) | remote | `docker compose up` / `down` / `restarted` / `pulled` | `dir` |
 | [`docker_build`](#docker_build-cli-local) | CLI host | Build image with `docker buildx`, optional `push:` | `context`, one of `tag` / `tags` |
 | [`docker_login`](#docker_login-cli-local-andor-remote) | both (default) / local / remote | `docker login` against a private registry | `registry`, `creds_file` (or inline) |
+| [`mysql_database`](#mysql_database) | remote | `CREATE DATABASE` (+ optional user/grant) via the `mysql` CLI | `name`, `host`, `admin_user`, `admin_password` |
+| [`pg_database`](#pg_database) | remote | `CREATE DATABASE` (+ optional role/grant) via the `psql` CLI | `name`, `host`, `admin_user`, `admin_password` |
 
 Common keys every task may carry:
 
@@ -809,6 +811,92 @@ typically age-encrypted (see [secrets.md](secrets.md)). The legacy form with
 inline `username:` + `password:` / `password_file:` / `password_env:` is also
 accepted.
 
+### `mysql_database`
+
+Ensure a MySQL database (and optionally an application user with full
+privileges on it) exists. Agent shells out to the `mysql` CLI on the remote
+— the client must be installed (e.g. via an upstream `apt: { name: [mysql-client] }`
+task). The admin password rides in through the `MYSQL_PWD` env var, never on
+argv, so it doesn't show up in `ps`.
+
+```yaml
+- name: mysql client
+  apt: { name: [mysql-client], update_cache: true }
+
+- name: app db + user
+  mysql_database:
+    name: myapp
+    host: 127.0.0.1
+    # port: 3306                             # optional, default 3306
+    admin_user: root
+    admin_password: "{{ .mysql_root_pw }}"   # load from age-encrypted vars
+    # charset: utf8mb4                       # optional, default utf8mb4
+    # collation: utf8mb4_0900_ai_ci          # optional, MySQL 8 default
+    user: myapp                              # optional — when set, agent also
+    password: "{{ .myapp_db_pw }}"           #   does CREATE USER + GRANT ALL
+    # user_host: '%'                         # optional grant scope, default '%'
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | Database name. Restricted to `[A-Za-z_][A-Za-z0-9_]{0,62}` to dodge SQL-quoting / injection. |
+| `host` | yes | DB host. No implicit `localhost` / socket fallback — always explicit. |
+| `port` | no | TCP port (default 3306). |
+| `admin_user` / `admin_password` | yes | Credentials of the account that's allowed to CREATE DATABASE / CREATE USER. |
+| `charset` / `collation` | no | Passed to `CREATE DATABASE`. Defaults are `utf8mb4` / `utf8mb4_0900_ai_ci`. |
+| `user` / `password` | no | When `user:` is set, the agent additionally runs `CREATE USER` and `GRANT ALL PRIVILEGES ON name.* TO user@user_host`. |
+| `user_host` | no | Scope for the user (default `'%'`). Set to `'localhost'` to lock the account to socket / loopback. |
+
+Idempotency: the agent queries `information_schema.SCHEMATA` for the DB and
+`mysql.user` for the role before running any CREATE. A converged DB reports
+`skipped`. **Charset / collation drift on an existing database is NOT
+reconciled** — this task creates, never alters. To change those on an
+existing DB, drop down to a `command:` with `ALTER DATABASE`.
+
+Status: `changed` on first run (or when something was missing), `skipped`
+once the DB + user both exist, `error` on connection / permission failures.
+
+### `pg_database`
+
+Ensure a PostgreSQL database (and optionally a role with `LOGIN` + full
+privileges on it) exists. Agent shells out to `psql`; the admin password
+rides in via `PGPASSWORD`. Postgres has no `CREATE DATABASE IF NOT EXISTS`,
+so the existence sniff against `pg_database` is load-bearing — without it
+a re-run would fail with SQLSTATE 42P04.
+
+```yaml
+- name: psql client
+  apt: { name: [postgresql-client], update_cache: true }
+
+- name: app db + role
+  pg_database:
+    name: myapp
+    host: 127.0.0.1
+    # port: 5432                             # optional, default 5432
+    admin_user: postgres
+    admin_password: "{{ .pg_admin_pw }}"
+    # encoding: UTF8                         # optional, default UTF8
+    # owner: myapp                           # optional; defaults to user when set, else admin_user
+    user: myapp                              # optional — when set, agent also
+    password: "{{ .myapp_db_pw }}"           #   does CREATE ROLE + GRANT ALL
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | Database name. Same identifier constraint as MySQL. |
+| `host` | yes | DB host (no implicit peer auth). |
+| `port` | no | TCP port (default 5432). |
+| `admin_user` / `admin_password` | yes | Superuser (or sufficiently-privileged role) that can CREATE DATABASE / CREATE ROLE. |
+| `encoding` | no | Encoding for `CREATE DATABASE` (default `UTF8`). |
+| `owner` | no | DB owner. Defaults to `user:` when set, else `admin_user`. |
+| `user` / `password` | no | When `user:` is set, the agent runs `CREATE ROLE … WITH LOGIN PASSWORD …` and `GRANT ALL PRIVILEGES ON DATABASE name TO user`. |
+
+Idempotency: queries `pg_database` for the DB and `pg_roles` for the role.
+Drift on `encoding` / `owner` of an existing DB is NOT reconciled.
+
+Status: `changed` / `skipped` / `error` with the same semantics as
+`mysql_database`.
+
 ## Reusing tasks across files
 
 There are two ways to split a rulebook and import pieces back together,
@@ -873,6 +961,10 @@ tasks:
   has neither
 - `docker_login:` is missing `registry:`, or sets multiple password sources,
   or sets the inline fields alongside `creds_file:`
+- `mysql_database:` / `pg_database:` is missing any of `name` / `host` /
+  `admin_user` / `admin_password`, has a `name:` / `user:` / `owner:` that
+  doesn't match `[A-Za-z_][A-Za-z0-9_]{0,62}`, has `port` outside 0..65535,
+  or sets `user:` without `password:`
 - A task has `when_changed:` on a `copy:` or `template:` (those tasks have
   their own sha-based skip logic and the gate would be redundant)
 - A `use:` reference points at a dep that isn't declared in `deps:`

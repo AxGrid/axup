@@ -191,6 +191,10 @@ func executeTask(ctx *runCtx, t protocol.Task) protocol.Event {
 		return runDockerInstallTask(ctx, t)
 	case protocol.TaskDockerLogin:
 		return runDockerLoginTask(ctx, t)
+	case protocol.TaskMysqlDatabase:
+		return runMysqlDatabaseTask(ctx, t)
+	case protocol.TaskPgDatabase:
+		return runPgDatabaseTask(ctx, t)
 	default:
 		return protocol.Event{
 			Status:  protocol.StatusError,

@@ -302,12 +302,58 @@ func expandTaskStrings(t *Task, vars map[string]any) error {
 			return err
 		}
 	}
+	if t.MysqlDatabase != nil {
+		if err := renderStringFields(vars,
+			&t.MysqlDatabase.Name,
+			&t.MysqlDatabase.Host,
+			&t.MysqlDatabase.AdminUser,
+			&t.MysqlDatabase.AdminPassword,
+			&t.MysqlDatabase.Charset,
+			&t.MysqlDatabase.Collation,
+			&t.MysqlDatabase.User,
+			&t.MysqlDatabase.Password,
+			&t.MysqlDatabase.UserHost,
+		); err != nil {
+			return err
+		}
+	}
+	if t.PgDatabase != nil {
+		if err := renderStringFields(vars,
+			&t.PgDatabase.Name,
+			&t.PgDatabase.Host,
+			&t.PgDatabase.AdminUser,
+			&t.PgDatabase.AdminPassword,
+			&t.PgDatabase.Encoding,
+			&t.PgDatabase.Owner,
+			&t.PgDatabase.User,
+			&t.PgDatabase.Password,
+		); err != nil {
+			return err
+		}
+	}
 	for i, p := range t.WhenChanged {
 		s, err := renderString(p, vars)
 		if err != nil {
 			return err
 		}
 		t.WhenChanged[i] = s
+	}
+	return nil
+}
+
+// renderStringFields runs renderString over a batch of string pointers and
+// writes results back in place. Reduces the line-noise for specs with many
+// templated leaves (e.g. *DatabaseSpec).
+func renderStringFields(vars map[string]any, fields ...*string) error {
+	for _, p := range fields {
+		if p == nil || *p == "" {
+			continue
+		}
+		s, err := renderString(*p, vars)
+		if err != nil {
+			return err
+		}
+		*p = s
 	}
 	return nil
 }

@@ -291,13 +291,19 @@ func validateTasks(phase string, tasks []Task) error {
 		if t.DockerLogin != nil {
 			set++
 		}
+		if t.MysqlDatabase != nil {
+			set++
+		}
+		if t.PgDatabase != nil {
+			set++
+		}
 		if t.Use != "" {
 			// `use:` must not survive past Load — if we see it here, expansion
 			// failed or wasn't run (e.g. no deps: declared).
 			return fmt.Errorf("%s[%d] (%q): use %q did not resolve — declare the dep in deps:[]", phase, i, t.Name, t.Use)
 		}
 		if set == 0 {
-			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/group/chmod/chown/download/apt/service/docker_compose/docker_install/docker_build/docker_login/use", phase, i, t.Name)
+			return fmt.Errorf("%s[%d] (%q): no operation set; expected one of command/copy/template/mkdir/symlink/remove/user/group/chmod/chown/download/apt/service/docker_compose/docker_install/docker_build/docker_login/mysql_database/pg_database/use", phase, i, t.Name)
 		}
 		if set > 1 {
 			return fmt.Errorf("%s[%d] (%q): multiple operations set; choose exactly one", phase, i, t.Name)
@@ -466,9 +472,62 @@ func validateTasks(phase string, tasks []Task) error {
 				return fmt.Errorf("%s[%d] (%q): docker_login location must be one of both/local/remote, got %q", phase, i, t.Name, t.DockerLogin.Location)
 			}
 		}
+		if t.MysqlDatabase != nil {
+			if err := validateDbCommon("mysql_database", t.MysqlDatabase.Name, t.MysqlDatabase.Host, t.MysqlDatabase.Port, t.MysqlDatabase.AdminUser, t.MysqlDatabase.AdminPassword, t.MysqlDatabase.User, t.MysqlDatabase.Password, phase, i, t.Name); err != nil {
+				return err
+			}
+		}
+		if t.PgDatabase != nil {
+			if err := validateDbCommon("pg_database", t.PgDatabase.Name, t.PgDatabase.Host, t.PgDatabase.Port, t.PgDatabase.AdminUser, t.PgDatabase.AdminPassword, t.PgDatabase.User, t.PgDatabase.Password, phase, i, t.Name); err != nil {
+				return err
+			}
+			if t.PgDatabase.Owner != "" && !sqlIdentRe.MatchString(t.PgDatabase.Owner) {
+				return fmt.Errorf("%s[%d] (%q): pg_database owner %q must match %s", phase, i, t.Name, t.PgDatabase.Owner, sqlIdentRe)
+			}
+		}
 		if len(t.WhenChanged) > 0 && (t.Copy != nil || t.Template != nil || t.Mkdir != nil || t.Symlink != nil || t.Remove != nil || t.Chmod != nil || t.Chown != nil || t.Download != nil) {
 			return fmt.Errorf("%s[%d] (%q): when_changed is redundant on copy/template/mkdir/symlink/remove/chmod/chown/download (each one stats its path and decides skip-vs-apply on its own)", phase, i, t.Name)
 		}
+	}
+	return nil
+}
+
+// sqlIdentRe constrains database / user names to the portable identifier
+// shape — leading letter or underscore, then letters / digits / underscores,
+// max 63 chars (Postgres' NAMEDATALEN-1 limit, also fine for MySQL). Keeps
+// us out of quoting / escaping minefields and out of the way of SQL
+// injection vectors when these names are spliced into CREATE DATABASE /
+// CREATE USER statements on the remote.
+var sqlIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,62}$`)
+
+// validateDbCommon centralizes the required-field + name/user identifier
+// checks shared by mysql_database and pg_database. The two specs differ on
+// optional fields (charset/collation vs encoding/owner) but the core
+// connection + name + optional-user contract is the same.
+func validateDbCommon(kind, name, host string, port int, adminUser, adminPassword, user, password, phase string, i int, taskName string) error {
+	if name == "" {
+		return fmt.Errorf("%s[%d] (%q): %s requires name", phase, i, taskName, kind)
+	}
+	if !sqlIdentRe.MatchString(name) {
+		return fmt.Errorf("%s[%d] (%q): %s name %q must match %s (alnum + _, leading letter, max 63 chars)", phase, i, taskName, kind, name, sqlIdentRe)
+	}
+	if host == "" {
+		return fmt.Errorf("%s[%d] (%q): %s requires host (no implicit socket/peer auth)", phase, i, taskName, kind)
+	}
+	if adminUser == "" {
+		return fmt.Errorf("%s[%d] (%q): %s requires admin_user", phase, i, taskName, kind)
+	}
+	if adminPassword == "" {
+		return fmt.Errorf("%s[%d] (%q): %s requires admin_password (load from age-encrypted vars/inventory for production)", phase, i, taskName, kind)
+	}
+	if port < 0 || port > 65535 {
+		return fmt.Errorf("%s[%d] (%q): %s port %d is out of range", phase, i, taskName, kind, port)
+	}
+	if user != "" && !sqlIdentRe.MatchString(user) {
+		return fmt.Errorf("%s[%d] (%q): %s user %q must match %s", phase, i, taskName, kind, user, sqlIdentRe)
+	}
+	if user != "" && password == "" {
+		return fmt.Errorf("%s[%d] (%q): %s user %q requires password", phase, i, taskName, kind, user)
 	}
 	return nil
 }

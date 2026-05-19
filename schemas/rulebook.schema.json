@@ -110,7 +110,7 @@
     },
     "task": {
       "type": "object",
-      "description": "Exactly one of: command, copy, template, mkdir, symlink, remove, user, group, chmod, chown, download, apt, service, docker_install, docker_compose, docker_build, docker_login, use.",
+      "description": "Exactly one of: command, copy, template, mkdir, symlink, remove, user, group, chmod, chown, download, apt, service, docker_install, docker_compose, docker_build, docker_login, mysql_database, pg_database, use.",
       "properties": {
         "name": { "type": "string", "description": "Human-readable label shown in CLI output." },
         "when_changed": {
@@ -141,6 +141,8 @@
         "docker_compose": { "$ref": "#/$defs/dockerCompose" },
         "docker_build": { "$ref": "#/$defs/dockerBuild" },
         "docker_login": { "$ref": "#/$defs/dockerLogin" },
+        "mysql_database": { "$ref": "#/$defs/mysqlDatabase" },
+        "pg_database": { "$ref": "#/$defs/pgDatabase" },
         "use": { "type": "string", "description": "Inline an imported module: '<dep>/<module_path>'." },
         "vars": {
           "type": "object",
@@ -376,6 +378,41 @@
         "password_file": { "type": "string" },
         "password_env": { "type": "string" },
         "location": { "enum": ["both", "local", "remote"], "default": "both" }
+      },
+      "additionalProperties": false
+    },
+    "mysqlDatabase": {
+      "type": "object",
+      "description": "CREATE DATABASE IF NOT EXISTS via the `mysql` CLI on the remote. Optionally also CREATE USER + GRANT ALL when `user` is set. Admin password is passed through the MYSQL_PWD env var (never on argv). Idempotent via information_schema.SCHEMATA + mysql.user lookups; charset/collation drift on an existing DB is NOT reconciled.",
+      "required": ["name", "host", "admin_user", "admin_password"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "Database name. Constrained to ASCII identifier shape to keep SQL splicing safe." },
+        "host": { "type": "string", "description": "DB host. No implicit socket / peer auth — always explicit." },
+        "port": { "type": "integer", "minimum": 0, "maximum": 65535, "default": 3306 },
+        "admin_user": { "type": "string", "description": "Account allowed to CREATE DATABASE / CREATE USER." },
+        "admin_password": { "type": "string", "description": "Admin password. Typically loaded from age-encrypted vars: `\"{{ .mysql_root_pw }}\"`." },
+        "charset": { "type": "string", "default": "utf8mb4" },
+        "collation": { "type": "string", "default": "utf8mb4_0900_ai_ci" },
+        "user": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "Optional app user. When set, the agent also runs CREATE USER + GRANT ALL on this database." },
+        "password": { "type": "string", "description": "Required when `user` is set." },
+        "user_host": { "type": "string", "default": "%", "description": "Grant scope. Set to `'localhost'` to lock the account to loopback / socket." }
+      },
+      "additionalProperties": false
+    },
+    "pgDatabase": {
+      "type": "object",
+      "description": "CREATE DATABASE via `psql` on the remote (with an existence sniff against pg_database since PG has no IF NOT EXISTS). Optionally also CREATE ROLE + GRANT ALL when `user` is set. Admin password is passed through the PGPASSWORD env var. Encoding/owner drift on an existing DB is NOT reconciled.",
+      "required": ["name", "host", "admin_user", "admin_password"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$" },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 0, "maximum": 65535, "default": 5432 },
+        "admin_user": { "type": "string" },
+        "admin_password": { "type": "string" },
+        "encoding": { "type": "string", "default": "UTF8" },
+        "owner": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$", "description": "Defaults to `user` when set, else `admin_user`." },
+        "user": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,62}$" },
+        "password": { "type": "string", "description": "Required when `user` is set." }
       },
       "additionalProperties": false
     }

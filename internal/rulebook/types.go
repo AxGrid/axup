@@ -200,6 +200,8 @@ type Task struct {
 	DockerInstall *DockerInstallSpec `yaml:"docker_install,omitempty"`
 	DockerBuild   *DockerBuildSpec   `yaml:"docker_build,omitempty"`
 	DockerLogin   *DockerLoginSpec   `yaml:"docker_login,omitempty"`
+	MysqlDatabase *MysqlDatabaseSpec `yaml:"mysql_database,omitempty"`
+	PgDatabase    *PgDatabaseSpec    `yaml:"pg_database,omitempty"`
 	Use           string             `yaml:"use,omitempty"`  // "<dep>/<module_path>"
 	Vars          map[string]any     `yaml:"vars,omitempty"` // passed to the imported module
 	WhenChanged   []string           `yaml:"when_changed,omitempty"`
@@ -511,6 +513,49 @@ type DockerLoginSpec struct {
 	Location     string `yaml:"location,omitempty"`      // both (default) | local | remote
 }
 
+// MysqlDatabaseSpec ensures a MySQL database exists, and (when user+password
+// are set) an application user with full privileges on that database. The
+// agent shells out to `mysql` on the remote with credentials passed via
+// MYSQL_PWD so they don't appear in `ps`. Connection params are mandatory —
+// no implicit socket / peer auth.
+//
+// Idempotency: existence is checked against information_schema.SCHEMATA and
+// mysql.user before any CREATE runs, so a re-run on a converged DB reports
+// `skipped`. Charset/collation drift on an already-existing DB is NOT
+// reconciled — this task only creates, never alters.
+type MysqlDatabaseSpec struct {
+	Name          string `yaml:"name"`
+	Host          string `yaml:"host"`
+	Port          int    `yaml:"port,omitempty"` // default 3306
+	AdminUser     string `yaml:"admin_user"`
+	AdminPassword string `yaml:"admin_password"`
+	Charset       string `yaml:"charset,omitempty"`   // default utf8mb4
+	Collation     string `yaml:"collation,omitempty"` // default utf8mb4_0900_ai_ci
+	User          string `yaml:"user,omitempty"`      // optional app user
+	Password      string `yaml:"password,omitempty"`  // required when user: is set
+	UserHost      string `yaml:"user_host,omitempty"` // grant scope; default '%'
+}
+
+// PgDatabaseSpec ensures a PostgreSQL database exists, and (when user+password
+// are set) a role with LOGIN + full privileges on that database. The agent
+// shells out to `psql` on the remote with credentials passed via PGPASSWORD.
+// Connection params are mandatory — no implicit peer/ident auth.
+//
+// Idempotency: existence is checked against pg_database and pg_roles before
+// CREATE runs. Encoding/owner drift on an already-existing DB is NOT
+// reconciled — create-only.
+type PgDatabaseSpec struct {
+	Name          string `yaml:"name"`
+	Host          string `yaml:"host"`
+	Port          int    `yaml:"port,omitempty"` // default 5432
+	AdminUser     string `yaml:"admin_user"`
+	AdminPassword string `yaml:"admin_password"`
+	Encoding      string `yaml:"encoding,omitempty"` // default UTF8
+	Owner         string `yaml:"owner,omitempty"`    // defaults to user: when set, else admin_user
+	User          string `yaml:"user,omitempty"`     // optional app role
+	Password      string `yaml:"password,omitempty"` // required when user: is set
+}
+
 // StringOrList lets a YAML field accept either "foo" or [foo, bar, …].
 type StringOrList []string
 
@@ -568,6 +613,10 @@ func (t Task) Kind() string {
 		return "docker_build"
 	case t.DockerLogin != nil:
 		return "docker_login"
+	case t.MysqlDatabase != nil:
+		return "mysql_database"
+	case t.PgDatabase != nil:
+		return "pg_database"
 	case t.Use != "":
 		return "use"
 	default:
